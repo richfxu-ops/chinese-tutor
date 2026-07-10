@@ -10,7 +10,12 @@ Usage (on Colab):
 
 The dataset is "conversational" (each row has a `messages` list), so SFTTrainer
 applies the tokenizer's chat template automatically — we don't format prompts by
-hand. We only ever compute loss on the assistant turns.
+hand. A DataCollatorForCompletionOnlyLM masks everything up to the assistant
+header, so loss is computed only on the tutor's reply (not the repeated system
+prompt or the user turn). Our data is single-turn, which is exactly what that
+collator handles. If the response template ever fails to match, the collator
+masks the whole example and loss stays flat — the --max-steps sanity run catches
+that.
 """
 
 from __future__ import annotations
@@ -21,9 +26,13 @@ import torch
 from datasets import load_dataset
 from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-from trl import SFTConfig, SFTTrainer
+from trl import DataCollatorForCompletionOnlyLM, SFTConfig, SFTTrainer
 
 import config as c
+
+# Qwen2.5 uses ChatML; the assistant turn begins with this header. The collator
+# masks all tokens before it, so only the tutor's reply contributes to the loss.
+RESPONSE_TEMPLATE = "<|im_start|>assistant\n"
 
 
 def build_bnb_config() -> BitsAndBytesConfig:
@@ -97,6 +106,7 @@ def main() -> None:
         warmup_ratio=t.warmup_ratio,
         logging_steps=t.logging_steps,
         max_seq_length=t.max_seq_len,
+        packing=False,                      # required: completion-only masking needs unpacked seqs
         bf16=True,
         optim="paged_adamw_8bit",           # memory-friendly optimizer for QLoRA
         gradient_checkpointing=True,
@@ -107,9 +117,10 @@ def main() -> None:
         seed=t.seed,
     )
 
-    # SFTTrainer applies the chat template, masks non-assistant tokens, and
-    # (given peft_config + a quantized model) wraps the base with LoRA and
-    # preps it for k-bit training.
+    # SFTTrainer applies the chat template and (given peft_config + a quantized
+    # model) wraps the base with LoRA and preps it for k-bit training. The
+    # collator restricts the loss to the assistant reply.
+    collator = DataCollatorForCompletionOnlyLM(RESPONSE_TEMPLATE, tokenizer=tokenizer)
     trainer = SFTTrainer(
         model=model,
         args=sft_config,
@@ -117,6 +128,7 @@ def main() -> None:
         eval_dataset=ds["eval"],
         peft_config=build_lora_config(),
         processing_class=tokenizer,
+        data_collator=collator,
     )
     trainer.train()
 

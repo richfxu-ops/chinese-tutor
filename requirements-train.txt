@@ -3,7 +3,7 @@
 # preinstalled; installing this file tops up the rest.
 transformers>=4.46
 peft>=0.13
-trl>=0.12
+trl>=0.12,<0.16        # SFTConfig(max_seq_length=...) + DataCollatorForCompletionOnlyLM; newer TRL renamed the arg
 bitsandbytes>=0.44
 accelerate>=1.0
 datasets>=3.0

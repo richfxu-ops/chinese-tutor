@@ -4,7 +4,7 @@ anthropic>=0.40
 transformers>=4.46
 torch>=2.4
 accelerate>=1.0
-gradio>=4.44
+gradio>=5.0            # Textbox(submit_btn=...) needs 5.0+
 # Local serving of the quantized 7B (ships Metal wheels for Apple Silicon)
 llama-cpp-python>=0.3.0
 # Reading layer (app-side pinyin + hover gloss)

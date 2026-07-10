@@ -48,6 +48,8 @@ def make_item_batches(items: list[str], n: int, per_call: int, rng: random.Rando
     """Build `n` target items (shuffled, cycling if n > len) chunked into batches
     of `per_call`. Each item becomes one example, so every example targets a
     distinct seed word/grammar point and coverage is even."""
+    if not items:
+        raise ValueError("empty seed list — check hsk5_vocab.txt / hsk5_grammar.txt")
     pool: list[str] = []
     while len(pool) < n:
         shuffled = items[:]
@@ -106,6 +108,8 @@ def extract_json_array(text: str) -> list[dict]:
 
 def to_records(task: c.TaskSpec, items: list[str], pairs: list[dict]) -> list[dict]:
     """Wrap teacher {user, assistant} pairs into the final chat schema."""
+    if len(pairs) != len(items):
+        print(f"  ~ {task.name}: teacher returned {len(pairs)} pairs for {len(items)} items (keeping {min(len(pairs), len(items))})")
     records = []
     for item, pair in zip(items, pairs):
         records.append(
@@ -136,8 +140,8 @@ def generate_batch(client, task: c.TaskSpec, items: list[str], retries: int = 2)
             )
             pairs = extract_json_array(resp.content[0].text)
             return to_records(task, items, pairs)
-        except (ValueError, json.JSONDecodeError, KeyError) as e:
-            last_err = e
+        except Exception as e:  # noqa: BLE001 — never let one bad batch (API error,
+            last_err = e        # rate limit, odd response shape) kill the whole paid run
     print(f"  ! dropped a {task.name} batch after {retries + 1} tries: {last_err}")
     return []
 

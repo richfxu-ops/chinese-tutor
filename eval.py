@@ -21,9 +21,10 @@ import json
 
 import torch
 from peft import PeftModel
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 import config as c
+from train import build_bnb_config  # reuse the exact 4-bit config train.py used
 
 RUBRIC_AXES = [
     "level_fit",      # answer stays at/below HSK-5, scaffolds rather than escalates
@@ -43,14 +44,8 @@ def build_model():
     tok = AutoTokenizer.from_pretrained(c.BASE_MODEL)
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
-    bnb = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type=c.TRAIN.bnb_4bit_quant_type,
-        bnb_4bit_use_double_quant=c.TRAIN.bnb_4bit_use_double_quant,
-        bnb_4bit_compute_dtype=getattr(torch, c.TRAIN.bnb_4bit_compute_dtype),
-    )
     base = AutoModelForCausalLM.from_pretrained(
-        c.BASE_MODEL, quantization_config=bnb, device_map="auto",
+        c.BASE_MODEL, quantization_config=build_bnb_config(), device_map="auto",
         torch_dtype=getattr(torch, c.TRAIN.bnb_4bit_compute_dtype),
     )
     model = PeftModel.from_pretrained(base, str(c.OUTPUT_DIR))  # tuned; disable_adapter() → base
@@ -128,14 +123,15 @@ def judge(results: list[dict]) -> None:
             )
             text = resp.content[0].text
             data = json.loads(text[text.index("{"): text.rindex("}") + 1])
-        except Exception as e:  # noqa: BLE001 — best-effort judge
+            a_scores, b_scores = data.get("A", {}), data.get("B", {})
+            winner = {"A": "base", "B": "tuned", "tie": "tie"}.get(data.get("winner"), "tie")
+        except Exception as e:  # noqa: BLE001 — best-effort judge, skip bad responses
             print(f"  judge skipped [{i}]: {e}")
             continue
-        winner = {"A": "base", "B": "tuned", "tie": "tie"}.get(data.get("winner"), "tie")
         wins[winner] += 1
         for ax in RUBRIC_AXES:
-            per_axis[ax]["base"] += float(data["A"].get(ax, 0))
-            per_axis[ax]["tuned"] += float(data["B"].get(ax, 0))
+            per_axis[ax]["base"] += float(a_scores.get(ax, 0))
+            per_axis[ax]["tuned"] += float(b_scores.get(ax, 0))
         print(f"  judged [{i}/{len(results)}] -> {winner}")
 
     n = max(1, sum(wins.values()))
