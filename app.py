@@ -60,9 +60,11 @@ rt { font-size: .5em; color: #b3302a; }
 .hz:hover { background: #e7f0ec; }
 """
 
-with gr.Blocks(title="HSK-5 中文 Tutor", css=CSS) as demo:
+with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
     gr.Markdown("# HSK-5 中文 Tutor\nBilingual answers · pinyin over every character · **hover a word for its meaning**.")
-    chatbot = gr.Chatbot(type="messages", sanitize_html=False, render_markdown=True, height=460, label="对话")
+    # Gradio 6: messages format is the default (no `type=`). sanitize_html=False +
+    # allow_tags lets the reading layer's <ruby>/<rt>/<span title> survive.
+    chatbot = gr.Chatbot(sanitize_html=False, render_markdown=True, height=460, label="对话")
     raw_state = gr.State([])
     msg = gr.Textbox(placeholder="用中文或英文问我… (ask in Chinese or English)", label="", submit_btn=True)
     gr.Examples(examples=STARTERS, inputs=msg, label="Try one of the six tasks")
@@ -71,4 +73,4 @@ with gr.Blocks(title="HSK-5 中文 Tutor", css=CSS) as demo:
     gr.Button("清空 Clear").click(lambda: ([], [], ""), None, [chatbot, raw_state, msg])
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(css=CSS)   # Gradio 6: css passes to launch(), not the Blocks constructor

@@ -21,3 +21,7 @@ cedict_ts.u8
 
 # OS
 .DS_Store
+
+# Local build/merge artifacts (not committed)
+llama.cpp/
+offload/
