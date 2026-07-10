@@ -2,6 +2,11 @@
 
 > Dated log of notable choices and *why*, so rationale isn't lost. Newest first.
 
+## 2026-07-10 — Pronunciation audio: browser TTS (flashcards) + edge-tts (chat app)
+- **Decision:** Flashcard widget uses the **browser Web Speech API** (client-side, zero-dep) for 🔊 pronunciation — done. The **chat app** will use neural **`edge-tts`** (server-side, free, consistent zh-CN neural voice) to read tutor replies aloud, wired at ship.
+- **Why:** The standalone flashcard file has no Python backend, so client-side TTS is the only option there (and macOS zh-CN voices are good). For the app, `edge-tts` gives consistent studio-quality audio regardless of the user's machine.
+- **Implications:** flashcards done; app `edge-tts` is an M3/ship task. App-layer, no retraining.
+
 ## 2026-07-10 — Flashcards: in-app SM-2 review (self-contained widget), not export-only
 - **Decision:** Build an in-app Anki-like review (**SM-2** spaced repetition) as a self-contained HTML/JS widget (`web/flashcards.html`), deck in `localStorage`. Chosen over export-only because the user won't reliably export to Anki. TSV/JSON export kept as a backup. To stay zero-friction (collect in chat → review, no import), the review will live as a **same-origin tab inside the Gradio app** at ship time; the widget is built + verified standalone now (SM-2 logic unit-tested in node).
 - **Why:** A review tool you'll actually open beats a better one you won't. SM-2 over FSRS for simplicity / no dependency. Same-origin matters: a separate `file://` page can't share the app's `localStorage`, which would reintroduce an import step. Refines the export-only framing below.

@@ -52,6 +52,9 @@
   .rate.hard{border-color:var(--gold);color:var(--gold)}
   .rate.good{border-color:var(--jade);color:var(--jade)}
   .rate.easy{border-color:var(--blue);color:var(--blue)}
+  .spk{border:none;background:none;cursor:pointer;font-size:1.3rem;line-height:1;padding:.1rem .3rem;vertical-align:middle;opacity:.55}
+  .spk:hover{opacity:1;transform:none}
+  .spk.sm{font-size:.95rem}
 
   .done{text-align:center;color:var(--muted)}
   .done .big{font-family:var(--serif);font-size:1.4rem;color:var(--ink);margin-bottom:.4rem}
@@ -82,6 +85,7 @@
   <div id="stage"></div>
 
   <div class="tools">
+    <button id="autobtn" onclick="toggleAutoplay()">🔊 Auto-play: off</button>
     <button onclick="exportTSV()">⤓ Export for Anki (TSV)</button>
     <button onclick="exportJSON()">⤓ Backup (JSON)</button>
     <button onclick="importJSON()">⤒ Import JSON</button>
@@ -128,6 +132,22 @@ function newCard(front, pinyin, gloss, example){
            front, pinyin, gloss, example: example||"",
            ease:2.5, interval:0, reps:0, lapses:0, due:0 };  // due:0 => new, review now
 }
+
+// ---- audio (browser TTS) -------------------------------------------------
+let zhVoice = null, lastSpokenId = null;
+let autoplay = localStorage.getItem("hsk5-autoplay") === "1";
+function pickVoice(){ const vs = window.speechSynthesis ? speechSynthesis.getVoices() : []; zhVoice = vs.find(v => /^zh/i.test(v.lang)) || null; }
+if (window.speechSynthesis){ pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
+function speak(text){
+  if(!window.speechSynthesis || !text) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "zh-CN"; u.rate = 0.9; if(zhVoice) u.voice = zhVoice;
+  speechSynthesis.speak(u);
+}
+function maybeAutoSpeak(c){ if(autoplay && c && c.id !== lastSpokenId){ lastSpokenId = c.id; speak(c.front); } }
+function toggleAutoplay(){ autoplay = !autoplay; localStorage.setItem("hsk5-autoplay", autoplay?"1":"0"); renderAutoBtn(); if(autoplay && current) speak(current.front); }
+function renderAutoBtn(){ const b = document.getElementById("autobtn"); if(b) b.textContent = "🔊 Auto-play: " + (autoplay ? "on" : "off"); }
 
 // ---- SM-2 scheduling -----------------------------------------------------
 // Returns the updated card (mutates a copy's schedule fields) for a rating.
@@ -176,21 +196,22 @@ function render(){
   if (queue.length === 0){ current = null; stage.innerHTML = doneView(); return; }
   current = queue[0];
   stage.innerHTML = revealed ? backView(current) : frontView(current);
+  if (!revealed) maybeAutoSpeak(current);
 }
 
 function frontView(c){
   return `<div class="card">
-      <div class="front">${esc(c.front)}</div>
+      <div class="front">${esc(c.front)} <button class="spk" onclick="speak(current.front)" title="Play (p)">🔊</button></div>
       <div class="hint">what does it mean?</div>
     </div>
     <button class="show-btn" onclick="reveal()">Show answer <span class="kbd">space</span></button>`;
 }
 function backView(c){
   return `<div class="card">
-      <div class="front">${esc(c.front)}</div>
+      <div class="front">${esc(c.front)} <button class="spk" onclick="speak(current.front)" title="Play (p)">🔊</button></div>
       <div class="pinyin">${esc(c.pinyin)}</div>
       <div class="gloss">${esc(c.gloss)}</div>
-      ${c.example ? `<div class="example">${esc(c.example)}</div>` : ``}
+      ${c.example ? `<div class="example">${esc(c.example)} <button class="spk sm" onclick="speak(current.example)" title="Play sentence">🔊</button></div>` : ``}
     </div>
     <div class="btns">
       ${rateBtn("again","Again",c)}${rateBtn("hard","Hard",c)}${rateBtn("good","Good",c)}${rateBtn("easy","Easy",c)}
@@ -250,6 +271,7 @@ function resetDeck(){
 // ---- keyboard ------------------------------------------------------------
 document.addEventListener("keydown", e => {
   if(e.target.tagName === "INPUT") return;
+  if(e.key === "p" || e.key === "P"){ if(current) speak(current.front); return; }
   if(!revealed && (e.code === "Space" || e.code === "Enter")){ e.preventDefault(); reveal(); return; }
   if(revealed){ const m = {Digit1:"again",Digit2:"hard",Digit3:"good",Digit4:"easy",Space:"good"};
     if(m[e.code]){ e.preventDefault(); rate(m[e.code]); } }
@@ -272,6 +294,7 @@ let toastT;
 function toast(msg){ const t = document.getElementById("toast"); t.textContent = msg; t.classList.add("show");
   clearTimeout(toastT); toastT = setTimeout(()=>t.classList.remove("show"), 1800); }
 
+renderAutoBtn();
 render();
 </script>
 </body>
