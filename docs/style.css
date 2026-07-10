@@ -1,0 +1,71 @@
+/* Shared styles for the chinese_tutor reference docs. Theme-aware (light/dark). */
+:root {
+  --ground:#f4f2ec; --surface:#fff; --surface-2:#faf8f3; --ink:#211c19;
+  --muted:#6d645b; --faint:#9a9086; --line:#e4ded3;
+  --seal:#b3302a; --jade:#2f6e5d; --gold:#9c7a2e;
+  --seal-wash:#f6e9e6; --jade-wash:#e7f0ec; --gold-wash:#f3ecdb;
+  --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Songti SC",Georgia,serif;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --ground:#16130f; --surface:#1f1b16; --surface-2:#241f19; --ink:#ece5da;
+  --muted:#a99f92; --faint:#766d61; --line:#322b23;
+  --seal:#dd6055; --jade:#6cb69f; --gold:#d0a752;
+  --seal-wash:#2b1a17; --jade-wash:#16241f; --gold-wash:#241d10;
+}}
+
+* { box-sizing:border-box; }
+body {
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:var(--sans); line-height:1.65; -webkit-font-smoothing:antialiased;
+}
+.wrap { max-width:46rem; margin:0 auto; padding:clamp(1.6rem,4vw,3.2rem) clamp(1.1rem,4vw,2rem) 4rem; }
+
+.eyebrow {
+  font-family:var(--mono); font-size:.72rem; letter-spacing:.16em; text-transform:uppercase;
+  color:var(--seal); display:flex; align-items:center; gap:.55rem; margin:0 0 .8rem;
+}
+.eyebrow::before { content:""; width:1.4rem; height:2px; background:var(--seal); }
+
+h1 { font-family:var(--serif); font-weight:600; font-size:clamp(1.9rem,5vw,2.6rem); line-height:1.1; letter-spacing:-.01em; text-wrap:balance; margin:0 0 .5rem; }
+.lead { font-size:1.1rem; color:var(--muted); margin:0 0 2rem; }
+h2 { font-family:var(--serif); font-weight:600; font-size:clamp(1.3rem,3vw,1.6rem); letter-spacing:-.01em; margin:2.6rem 0 .6rem; }
+h3 { font-size:1.05rem; font-weight:650; margin:1.6rem 0 .4rem; }
+
+p, li { font-size:1rem; }
+p { margin:0 0 1rem; }
+ul, ol { margin:0 0 1rem; padding-left:1.3rem; }
+li { margin:.3rem 0; }
+strong { font-weight:650; }
+a { color:var(--seal); text-underline-offset:2px; }
+
+code { font-family:var(--mono); font-size:.85em; background:var(--surface-2); border:1px solid var(--line); padding:.05rem .32rem; border-radius:4px; }
+pre { background:var(--surface-2); border:1px solid var(--line); border-radius:8px; padding:.9rem 1.05rem; overflow-x:auto; margin:0 0 1.2rem; }
+pre code { background:none; border:none; padding:0; font-size:.86rem; line-height:1.55; }
+
+.callout { background:var(--surface-2); border:1px solid var(--line); border-left:3px solid var(--gold); border-radius:6px; padding:.9rem 1.1rem; margin:0 0 1.2rem; font-size:.96rem; color:var(--muted); }
+.callout strong, .callout b { color:var(--ink); }
+.callout.jade { border-left-color:var(--jade); }
+.callout.seal { border-left-color:var(--seal); }
+
+table { border-collapse:collapse; width:100%; margin:0 0 1.3rem; font-size:.94rem; }
+th, td { border:1px solid var(--line); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+th { background:var(--surface-2); font-family:var(--mono); font-size:.76rem; letter-spacing:.03em; text-transform:uppercase; color:var(--muted); }
+td code { white-space:nowrap; }
+
+.flow { font-family:var(--mono); font-size:.8rem; line-height:1.7; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:1rem 1.1rem; overflow-x:auto; color:var(--ink); margin:0 0 1.3rem; }
+
+.zh { font-family:var(--sans); }
+
+.crumb { font-family:var(--mono); font-size:.78rem; margin:0 0 1.6rem; }
+.crumb a { color:var(--muted); text-decoration:none; }
+.crumb a:hover { color:var(--seal); }
+
+.foot { margin-top:3rem; padding-top:1.2rem; border-top:1px solid var(--line); color:var(--faint); font-size:.82rem; font-family:var(--mono); }
+
+.cardgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(15rem,1fr)); gap:.9rem; margin:1.4rem 0; }
+.card { display:block; text-decoration:none; color:inherit; background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:1.1rem 1.2rem; transition:border-color .15s, transform .15s; }
+.card:hover { border-color:var(--seal); transform:translateY(-2px); }
+.card h3 { margin:.1rem 0 .4rem; font-family:var(--serif); font-size:1.15rem; }
+.card p { margin:0; color:var(--muted); font-size:.92rem; }

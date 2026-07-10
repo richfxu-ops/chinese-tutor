@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Colab training run, explained</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <p class="crumb"><a href="index.html">← docs</a></p>
+  <p class="eyebrow">Training · reference</p>
+  <h1>The Colab training run, exactly</h1>
+  <p class="lead">What each stage of <code>train_colab.ipynb</code> does, what QLoRA is actually doing under the hood, and why we convert the result three times before it reaches your Mac.</p>
+
+  <h2>The one-line version</h2>
+  <p>We take stock Qwen2.5-7B, nudge a tiny set of add-on weights so it behaves like our tutor, then repackage the result into a small file the Mac can run. All the heavy compute happens on Colab because it needs a CUDA GPU.</p>
+
+  <h2>Why Colab at all</h2>
+  <p><code>bitsandbytes</code> 4-bit quantization is <strong>CUDA-only</strong> — it won't run on Apple Silicon. So training happens on a rented GPU; only the final small artifact comes back to your Mac.</p>
+
+  <h2>The pipeline</h2>
+  <div class="flow">upload files ─▶ [sanity run] ─▶ [full train] ─▶ [eval] ─▶ [merge] ─▶ [GGUF] ─▶ download
+                 20 steps         the fine-tune    before/    adapter    4-bit
+                 "does it move?"   (~30–60 min)     after      → fp16     ~4.7GB</div>
+  <table>
+    <thead><tr><th>Stage</th><th>What it does</th><th>Output</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Install + upload</strong></td><td>Pin deps (<code>trl&lt;0.16</code> etc.), upload <code>config/train/eval/merge</code> + the 2 <code>.jsonl</code></td><td>—</td></tr>
+      <tr><td><strong>Sanity run</strong><br><code>train.py --max-steps 20</code></td><td>20 optimizer steps to prove the pipeline works and loss decreases</td><td>throwaway</td></tr>
+      <tr><td><strong>Full train</strong><br><code>train.py</code></td><td>The actual QLoRA fine-tune, 3 epochs</td><td>a <strong>LoRA adapter</strong> (~tens of MB)</td></tr>
+      <tr><td><strong>Eval</strong><br><code>eval.py</code></td><td>Generate base-vs-tuned on held-out prompts</td><td><code>eval_report.md</code></td></tr>
+      <tr><td><strong>Merge</strong><br><code>merge.py</code></td><td>Fold the adapter into the base weights</td><td>fp16 model (~15GB)</td></tr>
+      <tr><td><strong>GGUF quantize</strong></td><td>Convert + shrink to 4-bit for llama.cpp</td><td><code>hsk5-tutor-q4_k_m.gguf</code> (~4.7GB)</td></tr>
+    </tbody>
+  </table>
+
+  <h2>What the "full train" step is actually doing (QLoRA)</h2>
+  <p>Three ideas stacked. This is the part specific to fine-tuning LLMs:</p>
+
+  <h3>1. Load the 7B in 4-bit, frozen</h3>
+  <p>Qwen's ~7.6B weights are quantized from 16-bit (~15GB) down to 4-bit (~4.5GB) so they fit a modest GPU. These weights are <strong>frozen</strong> — no gradients, they never change. This is the <strong>Q</strong> in QLoRA: a <em>quantized</em> base.</p>
+
+  <h3>2. Attach LoRA adapters — the only thing that trains</h3>
+  <p>On each attention + MLP projection we add a pair of small low-rank matrices (rank <code>r=16</code>). Instead of updating 7.6B frozen weights, we only learn these adapters (~40M params, &lt;1% of the model). The frozen weights do the heavy lifting; the adapters learn the <em>adjustment</em> toward tutor behavior. This is the <strong>LoRA</strong> — <em>low-rank adaptation</em> — and it's why the whole thing fits in memory and trains in an hour instead of needing a cluster.</p>
+
+  <h3>3. A standard supervised loop — with one twist</h3>
+  <p>For each batch:</p>
+  <ul>
+    <li>format the example with Qwen's <strong>chat template</strong> (system/user/assistant turns → one token sequence);</li>
+    <li>forward pass, <strong>cross-entropy loss</strong> — but <em>masked to the assistant tokens only</em> (our <code>DataCollatorForCompletionOnlyLM</code>). It's graded on reproducing the tutor's reply, <strong>not</strong> the system prompt or your question;</li>
+    <li>backprop → gradients flow <strong>only into the LoRA adapters</strong> → optimizer (<code>paged_adamw_8bit</code>) updates them;</li>
+    <li>3 passes over the 810 examples, effective batch size 16, LR <code>2e-4</code> cosine-decayed.</li>
+  </ul>
+  <p>The result is <strong>not</strong> a full model — it's a small <strong>adapter</strong> that says "here's how to bend Qwen toward tutoring".</p>
+
+  <h2>The three conversions after training</h2>
+  <table>
+    <thead><tr><th>Step</th><th>Why it exists</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Eval</strong></td><td>Sanity-check the improvement: run the held-out prompts with the adapter <em>off</em> (plain Qwen) and <em>on</em> (the tutor), so you can see before/after.</td></tr>
+      <tr><td><strong>Merge</strong></td><td>You can't conveniently serve "4-bit base + separate adapter" on a Mac. So we reload the base in 16-bit and mathematically add the adapter's deltas into the weights → one standalone model.</td></tr>
+      <tr><td><strong>GGUF quantize</strong></td><td>That merged model is 15GB and slow on MPS. We convert it to GGUF (llama.cpp's format) and re-quantize to 4-bit (Q4_K_M, ~4.7GB), which runs fast on Apple Silicon via Metal. <em>This</em> file is what <code>app.py</code> loads.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>What to watch</h2>
+  <div class="callout seal"><strong>Sanity run:</strong> the printed <strong>loss should trend down</strong> across the 20 steps. If it's flat or NaN, the assistant-masking template didn't match Qwen's ChatML — stop, and we fix <code>RESPONSE_TEMPLATE</code> in <code>train.py</code> before spending time on the full run.</div>
+  <p><strong>Full run:</strong> final train + eval loss, then the <code>eval.py</code> report — that's where we actually judge whether the tutor got better.</p>
+
+  <h2>Time &amp; cost</h2>
+  <p>~30–60 min of Colab GPU time (L4 / A100 comfortable; free T4 works but slower). It spends your <strong>Colab compute</strong>, not API dollars — the data generation was the only API cost.</p>
+
+  <div class="foot">chinese_tutor · reference doc · training</div>
+</div>
+</body>
+</html>

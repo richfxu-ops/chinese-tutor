@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How these open-source models work</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <p class="crumb"><a href="index.html">← docs</a></p>
+  <p class="eyebrow">Concepts · reference</p>
+  <h1>How these open-source models actually work</h1>
+  <p class="lead">The mental model behind Qwen, why "reading files" isn't a thing the model does, and the two-model architecture we're building around it.</p>
+
+  <h2>1. The model is just <code>text → text</code></h2>
+  <p>An open-source model like Qwen is, at heart, <strong>a function that takes text in and produces text out</strong>. That's the whole interface. It has:</p>
+  <ul>
+    <li><strong>no filesystem</strong> — it can't open files;</li>
+    <li><strong>no memory</strong> between conversations;</li>
+    <li><strong>no agency</strong> — it can't decide to "go look something up".</li>
+  </ul>
+  <p>The <em>only</em> way information reaches it is the <strong>context window</strong> — the block of text you hand it each turn (system prompt + conversation so far + your new message). Whatever's in that block, it "knows". Whatever isn't, it doesn't.</p>
+
+  <h2>2. "Reading files" is the app's job, not the model's</h2>
+  <p>When you see a coding assistant "read your files", the model isn't doing that. The <strong>program around the model</strong> (the "harness" — the app) reads the file and pastes its text into the context window. The model just sees text.</p>
+  <div class="callout">Our reading layer works the same way: the model outputs clean Chinese, and <code>app.py</code> (via jieba / pypinyin / CC-CEDICT) adds the pinyin and hover glosses. The model never touches a file.</div>
+
+  <h2>3. Two ways to shape behavior</h2>
+  <p>There are two completely different levers for changing what a model does — and knowing which is which is the key insight for the whole project:</p>
+  <table>
+    <thead><tr><th></th><th>Fine-tuning</th><th>Context injection</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Teaches</strong></td><td><em>Style / behavior</em> — "respond like an HSK-5 tutor, bilingual, this format"</td><td><em>Specific current info</em> — "focus on these 20 words this week"</td></tr>
+      <tr><td><strong>Baked into</strong></td><td>the model's weights</td><td>just the prompt, per session</td></tr>
+      <tr><td><strong>Changing it</strong></td><td>slow + costs money (regenerate data + retrain)</td><td>instant + free (edit a text file)</td></tr>
+      <tr><td><strong>Good for</strong></td><td>consistent behavior</td><td>specific, changing content</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Rule of thumb:</strong> if it changes often or is specific (a curriculum, a word list), it belongs in <em>context</em>, not training. You'd never retrain the model every time the lesson changes.</p>
+
+  <h2>4. Our fine-tune is knowledge distillation</h2>
+  <p>A big capable model (Claude) writes the training examples; a small model (Qwen) learns to imitate them. That's <strong>distillation</strong> — teacher → student.</p>
+  <div class="flow">Claude (teacher)  ──generates──▶  data/train.jsonl  ──trains──▶  Qwen2.5-7B (student)
+  smart, expensive                  ~900 examples                  small, yours to run</div>
+  <p>Crucially, the fine-tune doesn't teach Qwen <em>Chinese</em> — it already knows Chinese from pretraining. It teaches the <strong>behavior</strong>: HSK-5 level, bilingual format, the correction shape, the encouraging tone. That's why the base-model quality sets the ceiling (why we chose 7B) but the dataset can stay small.</p>
+
+  <h2>5. The two-model architecture we're building toward</h2>
+  <p>Because the small model can't plan or remember, the design splits responsibilities:</p>
+  <table>
+    <thead><tr><th>Role</th><th>Who</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Coach / planner</strong></td><td>Claude</td><td>Has reasoning + memory (via files). Discusses goals, tracks progress, writes the plan. Runs occasionally.</td></tr>
+      <tr><td><strong>Drill instructor / executor</strong></td><td>Qwen (fine-tuned)</td><td>Small, fast, local, cheap. Does the actual HSK-5 tutoring. Runs constantly.</td></tr>
+      <tr><td><strong>Shared memory</strong></td><td><code>curriculum.md</code> / <code>progress.md</code></td><td>Claude <em>writes</em> them; the app <em>persists</em> them; Qwen <em>reads</em> them (injected into its prompt). The files ARE the long-term memory Qwen lacks.</td></tr>
+    </tbody>
+  </table>
+  <p>This is the standard "planner + specialized executor with a shared state file" pattern. The planner has judgment and memory; the executor is cheap and focused; a plain text file is the bridge between them.</p>
+
+  <h2>6. Why this matters for the project</h2>
+  <p>Everything that isn't "be a good HSK-5 tutor" lives in the <strong>app</strong>, not the model — the pinyin/hover reading layer, curriculum injection, flashcard extraction. They're all built from deterministic tools (jieba / pypinyin / CC-CEDICT) around a focused model. The payoff: these features stack up without ever forcing a retrain.</p>
+
+  <div class="foot">chinese_tutor · reference doc · concepts</div>
+</div>
+</body>
+</html>
