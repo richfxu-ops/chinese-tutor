@@ -6,7 +6,8 @@
 ## Backlog
 - [ ] (P3) ~~Optional: deploy to HF Spaces~~ — not feasible for a 7B on free Spaces; local demo only #ship #M3
 - [ ] (P3) v2 roadmap: curriculum coach — Claude writes curriculum.md/progress.md, app.py injects into Qwen prompt (app-layer, no retrain) #roadmap
-- [ ] (P3) v2 roadmap: Anki export — click-to-collect/auto-extract vocab → TSV/.apkg (reuse jieba/pypinyin/CC-CEDICT) #roadmap
+- [ ] (P2) Integrate flashcards as a Gradio tab + wire click-to-collect from chat #ship #M3
+- [ ] (P3) v2 roadmap: auto-extract vocab from a conversation (jieba ∩ CC-CEDICT) into the deck #roadmap
 - [ ] (P3) v2 roadmap: text-to-speech + voice chat (ASR) #roadmap
 
 ## Next
@@ -36,3 +37,5 @@
 - [x] README with quickstart + before/after template #ship #M3
 - [x] Decision: base model = Qwen2.5-7B (resolved, not 1.5B/3B) #train
 - [x] RUN: gen_data.py → 810 train / 90 eval, all quality checks clean #data #run
+- [x] web/flashcards.html — self-contained SM-2 review widget (localStorage, verified) #ship
+- [x] docs/ reference pages (how-llms-work, training-run) + long-explanation pref #infra

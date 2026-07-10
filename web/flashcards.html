@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HSK-5 Flashcards</title>
+<style>
+  :root{
+    --ground:#f4f2ec; --surface:#fff; --surface-2:#faf8f3; --ink:#211c19;
+    --muted:#6d645b; --faint:#9a9086; --line:#e4ded3;
+    --seal:#b3302a; --jade:#2f6e5d; --gold:#9c7a2e; --blue:#2f6e9e;
+    --seal-wash:#f6e9e6; --jade-wash:#e7f0ec;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Songti SC",Georgia,serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --ground:#16130f; --surface:#1f1b16; --surface-2:#241f19; --ink:#ece5da;
+    --muted:#a99f92; --faint:#766d61; --line:#322b23;
+    --seal:#dd6055; --jade:#6cb69f; --gold:#d0a752; --blue:#6fa8d0;
+    --seal-wash:#2b1a17; --jade-wash:#16241f;
+  }}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:38rem;margin:0 auto;padding:clamp(1.2rem,4vw,2.4rem) clamp(1rem,4vw,1.6rem) 3rem}
+
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:1.4rem}
+  h1{font-family:var(--serif);font-weight:600;font-size:1.5rem;margin:0}
+  h1 .en{color:var(--faint);font-family:var(--sans);font-size:.8rem;font-weight:400}
+  .stats{display:flex;gap:.4rem;font-family:var(--mono);font-size:.72rem}
+  .chip{padding:.28rem .55rem;border-radius:5px;border:1px solid var(--line);background:var(--surface);color:var(--muted)}
+  .chip b{color:var(--ink)}
+  .chip.due b{color:var(--seal)}
+
+  /* card */
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:2.4rem 1.6rem;text-align:center;min-height:15rem;display:flex;flex-direction:column;justify-content:center;gap:.6rem}
+  .front{font-family:var(--sans);font-size:3.4rem;font-weight:500;line-height:1.1}
+  .pinyin{font-family:var(--mono);font-size:1.15rem;color:var(--seal);letter-spacing:.02em}
+  .gloss{font-size:1.15rem}
+  .example{margin-top:.5rem;padding-top:.8rem;border-top:1px solid var(--line);color:var(--muted);font-size:1.05rem;line-height:1.9}
+  .hint{font-family:var(--mono);font-size:.72rem;color:var(--faint);margin-top:.4rem}
+
+  .btns{display:flex;gap:.5rem;margin-top:1rem}
+  button{font-family:var(--sans);font-size:.92rem;font-weight:550;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:.6rem .8rem;transition:transform .08s,border-color .15s}
+  button:hover{transform:translateY(-1px)}
+  button:active{transform:translateY(0)}
+  .show-btn{width:100%;padding:.8rem;font-size:1rem;background:var(--ink);color:var(--ground);border-color:var(--ink)}
+  .rate{flex:1;display:flex;flex-direction:column;gap:.15rem;align-items:center}
+  .rate .lab{font-weight:600}
+  .rate .iv{font-family:var(--mono);font-size:.66rem;color:var(--faint)}
+  .rate.again{border-color:var(--seal);color:var(--seal)}
+  .rate.hard{border-color:var(--gold);color:var(--gold)}
+  .rate.good{border-color:var(--jade);color:var(--jade)}
+  .rate.easy{border-color:var(--blue);color:var(--blue)}
+
+  .done{text-align:center;color:var(--muted)}
+  .done .big{font-family:var(--serif);font-size:1.4rem;color:var(--ink);margin-bottom:.4rem}
+
+  .tools{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:1.6rem;padding-top:1.2rem;border-top:1px solid var(--line)}
+  .tools button{font-size:.78rem;padding:.4rem .6rem;color:var(--muted)}
+  details{margin-top:1rem}
+  summary{cursor:pointer;font-size:.85rem;color:var(--muted);font-family:var(--mono)}
+  .addform{display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-top:.7rem}
+  .addform input{grid-column:span 1;font-family:var(--sans);font-size:.9rem;padding:.5rem .6rem;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink)}
+  .addform input.wide{grid-column:1 / -1}
+  .addform button{grid-column:1 / -1;background:var(--jade);color:#fff;border-color:var(--jade)}
+  .toast{position:fixed;bottom:1rem;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--ground);padding:.5rem .9rem;border-radius:8px;font-size:.85rem;opacity:0;transition:opacity .2s;pointer-events:none}
+  .toast.show{opacity:1}
+  .kbd{font-family:var(--mono);font-size:.62rem;border:1px solid var(--line);border-radius:3px;padding:0 .25rem;color:var(--faint)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>HSK-5 卡片 <span class="en">flashcards</span></h1>
+    <div class="stats">
+      <span class="chip due">due <b id="s-due">0</b></span>
+      <span class="chip">deck <b id="s-total">0</b></span>
+    </div>
+  </header>
+
+  <div id="stage"></div>
+
+  <div class="tools">
+    <button onclick="exportTSV()">⤓ Export for Anki (TSV)</button>
+    <button onclick="exportJSON()">⤓ Backup (JSON)</button>
+    <button onclick="importJSON()">⤒ Import JSON</button>
+    <button onclick="resetDeck()">⟲ Reset deck</button>
+  </div>
+
+  <details>
+    <summary>+ Add a card manually</summary>
+    <div class="addform">
+      <input id="f-front" class="wide" placeholder="词 (hanzi)  e.g. 安慰">
+      <input id="f-pinyin" placeholder="pinyin  e.g. ānwèi">
+      <input id="f-gloss" placeholder="meaning  e.g. to comfort">
+      <input id="f-example" class="wide" placeholder="example sentence (optional)">
+      <button onclick="addFromForm()">Add card</button>
+    </div>
+  </details>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+const KEY = "hsk5-tutor-deck-v1";
+const DAY = 24 * 60 * 60 * 1000;
+
+// ---- persistence ---------------------------------------------------------
+function load(){ try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; } }
+function save(){ localStorage.setItem(KEY, JSON.stringify(deck)); }
+let deck = load();
+
+// Seed a few sample HSK-5 cards on first run so the review flow is testable.
+if (deck.length === 0){
+  [
+    ["安慰","ānwèi","to comfort; console","朋友没通过考试，我去安慰他。"],
+    ["既然","jìrán","since; now that","既然你不舒服，就在家好好休息吧。"],
+    ["妨碍","fáng'ài","to hinder; hamper","别让手机妨碍你的学习。"],
+    ["承担","chéngdān","to undertake; bear (responsibility)","他愿意承担这个责任。"],
+    ["规矩","guīju","rules; customs","吃饭的时候有很多规矩。"],
+  ].forEach(([front,pinyin,gloss,example]) => deck.push(newCard(front,pinyin,gloss,example)));
+  save();
+}
+
+function newCard(front, pinyin, gloss, example){
+  return { id: front + ":" + (Date.now()+Math.round(performance.now())),
+           front, pinyin, gloss, example: example||"",
+           ease:2.5, interval:0, reps:0, lapses:0, due:0 };  // due:0 => new, review now
+}
+
+// ---- SM-2 scheduling -----------------------------------------------------
+// Returns the updated card (mutates a copy's schedule fields) for a rating.
+function schedule(card, rating){
+  const q = {again:0, hard:3, good:4, easy:5}[rating];
+  if (rating === "again"){
+    card.reps = 0; card.lapses++; card.interval = 0;
+    card.ease = Math.max(1.3, card.ease - 0.2);
+    card.due = Date.now() + 60*1000;               // ~1 min: comes back this session
+    return card;
+  }
+  if (card.reps === 0)      card.interval = (rating === "easy") ? 4 : 1;
+  else if (card.reps === 1) card.interval = 6;
+  else {
+    let mult = card.ease * (rating === "hard" ? 0.8 : 1) * (rating === "easy" ? 1.3 : 1);
+    card.interval = Math.max(1, Math.round(card.interval * mult));
+  }
+  card.reps++;
+  card.ease = Math.max(1.3, card.ease + (0.1 - (5-q)*(0.08 + (5-q)*0.02)));
+  card.due = Date.now() + card.interval * DAY;
+  return card;
+}
+
+// Human-readable next interval for the button labels (no mutation).
+function preview(card, rating){
+  const c = JSON.parse(JSON.stringify(card));
+  schedule(c, rating);
+  if (rating === "again") return "<1m";
+  const d = c.interval;
+  return d < 1 ? "<1d" : d + "d";
+}
+
+// ---- queue + render ------------------------------------------------------
+function dueCards(){ const now = Date.now(); return deck.filter(c => c.due <= now).sort((a,b)=>a.due-b.due); }
+let current = null, revealed = false;
+
+function refreshStats(){
+  document.getElementById("s-due").textContent = dueCards().length;
+  document.getElementById("s-total").textContent = deck.length;
+}
+
+function render(){
+  refreshStats();
+  const stage = document.getElementById("stage");
+  const queue = dueCards();
+  if (queue.length === 0){ current = null; stage.innerHTML = doneView(); return; }
+  current = queue[0];
+  stage.innerHTML = revealed ? backView(current) : frontView(current);
+}
+
+function frontView(c){
+  return `<div class="card">
+      <div class="front">${esc(c.front)}</div>
+      <div class="hint">what does it mean?</div>
+    </div>
+    <button class="show-btn" onclick="reveal()">Show answer <span class="kbd">space</span></button>`;
+}
+function backView(c){
+  return `<div class="card">
+      <div class="front">${esc(c.front)}</div>
+      <div class="pinyin">${esc(c.pinyin)}</div>
+      <div class="gloss">${esc(c.gloss)}</div>
+      ${c.example ? `<div class="example">${esc(c.example)}</div>` : ``}
+    </div>
+    <div class="btns">
+      ${rateBtn("again","Again",c)}${rateBtn("hard","Hard",c)}${rateBtn("good","Good",c)}${rateBtn("easy","Easy",c)}
+    </div>`;
+}
+function rateBtn(r, label, c){
+  const key = {again:"1",hard:"2",good:"3",easy:"4"}[r];
+  return `<button class="rate ${r}" onclick="rate('${r}')">
+      <span class="lab">${label} <span class="kbd">${key}</span></span>
+      <span class="iv">${preview(c, r)}</span></button>`;
+}
+function doneView(){
+  const next = deck.length ? Math.min(...deck.map(c=>c.due)) : 0;
+  const when = next ? relTime(next - Date.now()) : "—";
+  return `<div class="card"><div class="done">
+      <div class="big">🎉 All caught up!</div>
+      <div>${deck.length ? "Next card due in " + when + "." : "Your deck is empty. Add some cards below."}</div>
+    </div></div>`;
+}
+
+// ---- actions -------------------------------------------------------------
+function reveal(){ if(current){ revealed = true; render(); } }
+function rate(r){
+  if(!current) return;
+  schedule(current, r); save(); revealed = false; render();
+}
+function addFromForm(){
+  const front = val("f-front"), pinyin = val("f-pinyin"), gloss = val("f-gloss"), example = val("f-example");
+  if(!front){ toast("Need at least the hanzi"); return; }
+  deck.push(newCard(front, pinyin, gloss, example)); save();
+  ["f-front","f-pinyin","f-gloss","f-example"].forEach(id=>document.getElementById(id).value="");
+  toast("Added " + front); render();
+}
+function exportTSV(){
+  const rows = deck.map(c => `${c.front}\t${[c.pinyin, c.gloss].filter(Boolean).join(" · ")}${c.example ? "<br>"+c.example : ""}`);
+  download("hsk5-flashcards.tsv", rows.join("\n"));
+  toast("Exported " + deck.length + " cards — import into Anki (Front / Back)");
+}
+function exportJSON(){ download("hsk5-deck-backup.json", JSON.stringify(deck, null, 2)); toast("Backed up deck"); }
+function importJSON(){
+  const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".json";
+  inp.onchange = e => { const f = e.target.files[0]; if(!f) return; const r = new FileReader();
+    r.onload = () => { try { const d = JSON.parse(r.result);
+      if(Array.isArray(d)){ deck = d; save(); revealed=false; render(); toast("Imported " + d.length + " cards"); }
+      else toast("Not a valid deck file"); } catch { toast("Could not parse file"); } };
+    r.readAsText(f); };
+  inp.click();
+}
+function resetDeck(){
+  if(confirm("Clear the whole deck (and re-seed the samples)? This can't be undone.")){
+    localStorage.removeItem(KEY); deck = load();
+    if(deck.length===0){ location.reload(); return; }
+    revealed=false; render();
+  }
+}
+
+// ---- keyboard ------------------------------------------------------------
+document.addEventListener("keydown", e => {
+  if(e.target.tagName === "INPUT") return;
+  if(!revealed && (e.code === "Space" || e.code === "Enter")){ e.preventDefault(); reveal(); return; }
+  if(revealed){ const m = {Digit1:"again",Digit2:"hard",Digit3:"good",Digit4:"easy",Space:"good"};
+    if(m[e.code]){ e.preventDefault(); rate(m[e.code]); } }
+});
+
+// ---- helpers -------------------------------------------------------------
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function val(id){ return document.getElementById(id).value.trim(); }
+function download(name, text){
+  const b = new Blob([text], {type:"text/plain;charset=utf-8"});
+  const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+}
+function relTime(ms){
+  if(ms < 60*1000) return "under a minute";
+  if(ms < DAY) return Math.round(ms/(60*60*1000)) + " hours";
+  return Math.round(ms/DAY) + " days";
+}
+let toastT;
+function toast(msg){ const t = document.getElementById("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastT); toastT = setTimeout(()=>t.classList.remove("show"), 1800); }
+
+render();
+</script>
+</body>
+</html>
