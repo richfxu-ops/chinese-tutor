@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Codebase walkthrough — how it all works</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <p class="crumb"><a href="index.html">← docs</a></p>
+  <p class="eyebrow">Reference · the whole codebase</p>
+  <h1>How all the code works</h1>
+  <p class="lead">A file-by-file tour of the project, and the one data structure that ties it all together. Read top-to-bottom or jump to a file.</p>
+
+  <h2>The big picture</h2>
+  <p>The whole system is a pipeline. A big model writes training data, a small model learns from it, and a thin app wraps the small model with helpers. Nothing clever hides in the model — everything user-facing (pinyin, glosses, flashcards) is ordinary code around it.</p>
+  <div class="flow">config.py  ← every stage reads this (the hub)
+   │
+   ▼
+gen_data.py ──▶ data/*.jsonl ──▶ train.py ──▶ adapter ──▶ merge.py ──▶ GGUF
+ (Claude writes)   (curriculum)   (QLoRA)                (fold in)   (shrink)
+                                     │                                  │
+                                  eval.py                            app.py ──▶ you
+                               (before/after)              (chat + annotate.py + flashcards)</div>
+  <div class="callout jade"><strong>The recurring theme:</strong> the model only does "be an HSK-5 tutor." Pinyin, hover glosses, flashcards, audio — all <em>app-layer</em> code (jieba / pypinyin / CC-CEDICT / a bit of JS), never the model. That's why features stack up without retraining.</div>
+
+  <h2>The thread that ties it together: the chat record</h2>
+  <p>Every training example — and every message at inference — is this shape:</p>
+  <pre><code>{
+  "task": "correct_sentence",          // which of the 6 task types
+  "hsk_target": ["承担"],               // the seed word/grammar it was built around
+  "messages": [
+    {"role": "system",    "content": SYSTEM_PROMPT},   // the tutor persona
+    {"role": "user",      "content": "帮我改：我昨天去过北京。"},
+    {"role": "assistant", "content": "..."}            // the ideal tutor reply
+  ]
+}</code></pre>
+  <p><code>gen_data.py</code> <em>produces</em> these, <code>train.py</code> <em>learns</em> from them, and <code>app.py</code> reuses the same <code>SYSTEM_PROMPT</code> at serve time — so the model is trained on exactly the behaviour we ask of it later. Keep that record in mind and the rest follows.</p>
+
+  <hr>
+
+  <h2>1 · <code>config.py</code> — the hub</h2>
+  <p>The single source of truth. Every script imports it, so nothing drifts. It holds:</p>
+  <ul>
+    <li><strong>Paths</strong> — where data, the adapter, the merged model, and the GGUF live.</li>
+    <li><strong>Model ids</strong> — <code>BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"</code> (the student) and <code>TEACHER_MODEL = "claude-sonnet-5"</code> (writes the data).</li>
+    <li><strong><code>SYSTEM_PROMPT</code></strong> — the tutor persona (HSK-5, bilingual, no inline pinyin, correction format). Used in every training example <em>and</em> at inference.</li>
+    <li><strong><code>TASKS</code></strong> — a list of six <code>TaskSpec</code> objects (explain_word, use_in_sentence, correct_sentence, translate, example_dialogue, grammar_point). Each says how many examples to make, whether to inject a vocab word or grammar point, and a plain-English instruction for the teacher. Keeping prompts as data keeps <code>gen_data.py</code> thin.</li>
+    <li><strong><code>TRAIN</code></strong> — a <code>TrainConfig</code> dataclass with all the QLoRA knobs: LoRA rank/alpha, 4-bit settings, learning rate, batch size, epochs.</li>
+  </ul>
+  <div class="callout">Want to change the tutor's behaviour, the dataset size, or a hyperparameter? It's all here — one file.</div>
+
+  <h2>2 · <code>gen_data.py</code> — Claude writes the curriculum</h2>
+  <p>Turns the seed word lists into ~900 tutoring examples by calling Claude. The flow:</p>
+  <ol>
+    <li><strong>Load seeds</strong> (<code>load_seed</code>) — read <code>hsk5_vocab.txt</code> / <code>hsk5_grammar.txt</code>, skipping comments.</li>
+    <li><strong>Plan batches</strong> (<code>make_item_batches</code>) — for each task, pick its target words (shuffled, cycling if needed), chunk into groups of 5. Each group = one API call; each word = one example, so coverage is even.</li>
+    <li><strong>Build the prompt</strong> (<code>build_teacher_prompt</code>) — assemble what we send Claude: the task instruction + the tutor persona + the 5 target words + "return a JSON array".</li>
+    <li><strong>Call Claude, in parallel</strong> (<code>generate_batch</code> via a <code>ThreadPoolExecutor</code>) — ~180 calls, 8 at a time. <code>response_text</code> pulls text out of the reply (skipping Sonnet 5's <em>thinking</em> blocks — the bug we hit and fixed). <code>extract_json_array</code> is tolerant of stray formatting; a bad batch is retried, then dropped — one failure never kills the paid run.</li>
+    <li><strong>Wrap + split</strong> (<code>to_records</code>, then <code>run</code>) — fold each <code>{user, assistant}</code> pair into the chat record above, hold out 10% <em>per task</em> for eval, shuffle, and write <code>data/train.jsonl</code> + <code>data/eval.jsonl</code>.</li>
+  </ol>
+  <p>CLI: <code>--dry-run</code> (assemble prompts, no API, free), <code>--limit N</code> (cheap smoke test), <code>--workers</code>.</p>
+
+  <h2>3 · <code>train.py</code> — the QLoRA fine-tune</h2>
+  <p>Runs on Colab (needs a CUDA GPU). Three helper pieces + a <code>main</code>:</p>
+  <ul>
+    <li><code>build_bnb_config()</code> — the 4-bit quantization config (nf4, double-quant). This is the <strong>Q</strong> in QLoRA: the 7B loads at ~4.5GB instead of ~15GB.</li>
+    <li><code>build_lora_config()</code> — the <strong>LoRA</strong> adapters (rank 16) attached to the attention + MLP projections. Only these ~40M params train; the 7B stays frozen.</li>
+    <li><code>main()</code> — loads the data as a "conversational" dataset, loads the 4-bit model, and hands both to TRL's <code>SFTTrainer</code>.</li>
+  </ul>
+  <p>The important subtlety is the loss mask: a <code>DataCollatorForCompletionOnlyLM</code> with the response template <code>"&lt;|im_start|&gt;assistant\n"</code> makes the loss count <strong>only the tutor's reply</strong>, not the system prompt or your question. It trains 3 epochs and saves a small <strong>adapter</strong> (tens of MB) — not a whole model.</p>
+  <p>(For the deeper mechanics — 4-bit + LoRA + the masked loop — see <a href="training-run.html">the training-run doc</a>.)</p>
+
+  <h2>4 · <code>eval.py</code> — did it actually get better?</h2>
+  <p>The before/after check. Clever bit: it loads the base 7B <em>once</em>, attaches the adapter, and toggles it:</p>
+  <pre><code>with model.disable_adapter():   # adapter OFF  → plain Qwen ("before")
+    base_out = generate(...)
+tuned_out = generate(...)        # adapter ON   → the tutor ("after")</code></pre>
+  <p>It runs both on the held-out prompts, writes a side-by-side <code>eval_report.md</code>, and — with <code>--judge</code> — asks Claude to score both on a 4-axis rubric (level-fit, correctness, task, format) and tally which wins.</p>
+
+  <h2>5 · <code>merge.py</code> + the GGUF step — package for the Mac</h2>
+  <p>QLoRA leaves you with "4-bit base + separate adapter", which is awkward to serve locally. <code>merge.py</code> reloads the base in 16-bit and <strong>folds the adapter's weights in</strong> (<code>merge_and_unload()</code>) → one standalone model. The notebook then converts that to <strong>GGUF</strong> and re-quantizes to 4-bit (<code>Q4_K_M</code>, ~4.7GB), which <code>llama.cpp</code> runs fast on Apple Silicon. That file is the deliverable you download.</p>
+
+  <h2>6 · <code>annotate.py</code> + <code>get_cedict.py</code> — the reading layer</h2>
+  <p>This is the "pinyin over every character + hover gloss" magic — and it's <strong>pure app-side code, no model</strong>. <code>annotate(text)</code>:</p>
+  <ol>
+    <li>finds the Chinese runs in the text (a regex; English passes through untouched);</li>
+    <li>segments each run into words with <strong>jieba</strong> (Chinese has no spaces);</li>
+    <li>gets per-character pinyin with <strong>pypinyin</strong> and an English gloss from the bundled <strong>CC-CEDICT</strong> dictionary;</li>
+    <li>emits HTML: <code>&lt;ruby&gt;休&lt;rt&gt;xiū&lt;/rt&gt;&lt;/ruby&gt;</code> for pinyin-above, wrapped in a <code>&lt;span title="…"&gt;</code> for the native hover tooltip.</li>
+  </ol>
+  <p><code>get_cedict.py</code> just downloads that dictionary once (with a TLS fix for macOS). Because pinyin comes from a library, it's <em>always correct</em> — the model never has to guess it.</p>
+
+  <h2>7 · <code>app.py</code> — the demo</h2>
+  <p>A Gradio chat that serves the merged GGUF locally via <code>llama-cpp-python</code> (Metal on your Mac). The one design trick worth knowing:</p>
+  <div class="callout"><strong>Two copies of the conversation.</strong> The model always sees the <em>raw</em> text (feeding it our HTML back would poison its context); the chat panel shows the <em>annotated</em> HTML (pinyin + hover). That's why there's a <code>raw_state</code> alongside the visible chatbot.</div>
+  <p>On each turn it prepends the <code>SYSTEM_PROMPT</code>, calls the model, then runs the reply through <code>annotate()</code> before display. It also has the six starter-example buttons.</p>
+
+  <h2>8 · <code>web/flashcards.html</code> — the SM-2 review widget</h2>
+  <p>A self-contained page (HTML + CSS + JS, no server). The deck lives in the browser's <code>localStorage</code>. <code>schedule(card, rating)</code> is the <strong>SM-2</strong> spaced-repetition algorithm: rate a card Again/Hard/Good/Easy and it sets the next due date via an interval + ease factor. Plus 🔊 browser text-to-speech. It'll become a tab inside <code>app.py</code> at ship, so "click a word in chat → it's in your deck" works with no export.</p>
+
+  <hr>
+
+  <h2>Where each file runs</h2>
+  <table>
+    <thead><tr><th>File</th><th>Runs on</th><th>When</th></tr></thead>
+    <tbody>
+      <tr><td><code>gen_data.py</code></td><td>your Mac (calls Claude API)</td><td>M1 — make data</td></tr>
+      <tr><td><code>train.py</code>, <code>eval.py</code>, <code>merge.py</code></td><td>Colab GPU</td><td>M2 — train + package</td></tr>
+      <tr><td><code>annotate.py</code>, <code>app.py</code>, flashcards</td><td>your Mac</td><td>M3 — ship + run</td></tr>
+      <tr><td><code>config.py</code></td><td>imported everywhere</td><td>always</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout jade">If one idea sticks: <strong>the chat record is the interface between stages.</strong> Claude writes it, Qwen learns it, the app serves it. Everything else is plumbing around that shape.</div>
+
+  <div class="foot">chinese_tutor · reference doc · codebase walkthrough</div>
+</div>
+</body>
+</html>
