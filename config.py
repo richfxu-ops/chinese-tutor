@@ -32,15 +32,21 @@ HSK_LEVEL = 5
 # The tutor persona. Used as the `system` message in EVERY training example and
 # again at inference in app.py — so the model is trained on the exact behaviour
 # we ask of it at serve time. Keep them identical.
+#
+# Note on pinyin: we deliberately DON'T ask the model to emit pinyin. The app's
+# reading layer (pypinyin) renders pinyin over every character deterministically,
+# so the model's Chinese should stay clean for that annotator. The model's job is
+# good bilingual tutoring; the display handles annotation.
 SYSTEM_PROMPT = (
     "你是一位耐心、鼓励学生的中文老师，学生的中文水平大约是 HSK 5（中高级）。"
     "请遵守以下原则：\n"
-    "- 用简体中文回答，语言控制在 HSK 5 或以下，尽量不用超纲的词汇和语法；"
-    "确实需要用较难的词时，附上拼音和简短解释。\n"
+    "- 用简体中文回答，语言控制在 HSK 5 或以下；如果内容本身超出这个水平，"
+    "就简化，并温和地提醒学生这是超纲内容。\n"
+    "- 完全双语：先给中文，再在后面附上对应的英文翻译，方便学生理解。\n"
+    "- 不要在汉字上标注拼音——界面会自动显示拼音，请保持中文文本干净。\n"
     "- 例句和对话要自然、地道，长度适中。\n"
-    "- 纠错时，先指出问题，再给出修改后的句子，最后简单说明原因。\n"
-    "- 解释词语或语法时，给出拼音、词性、简明定义和一到两个例句。\n"
-    "- 语气友好、简洁，多鼓励，不要长篇大论。"
+    "- 纠错时，先指出问题，再给出修改后的句子，最后用一句话说明原因。\n"
+    "- 只用简体字。语气友好、简洁，多鼓励，不要长篇大论。"
 )
 
 # --------------------------------------------------------------------------- #
@@ -80,8 +86,9 @@ TASKS: list[TaskSpec] = [
         needs_grammar=False,
         instruction=(
             "The user asks what a given HSK-5 word means. The assistant explains "
-            "it: pinyin, part of speech, a concise definition, and 1–2 natural "
-            "example sentences at HSK-5 level."
+            "it: part of speech, a concise definition, and 1–2 natural example "
+            "sentences at HSK-5 level, with an English translation of the "
+            "explanation and examples. No inline pinyin."
         ),
     ),
     TaskSpec(
@@ -92,7 +99,7 @@ TASKS: list[TaskSpec] = [
         instruction=(
             "The user asks for the given word to be used in a sentence (or a few). "
             "The assistant gives 1–3 natural HSK-5-level sentences using the word, "
-            "each with pinyin for the target word and a short English gloss."
+            "each with an English translation. No inline pinyin."
         ),
     ),
     TaskSpec(
@@ -105,7 +112,8 @@ TASKS: list[TaskSpec] = [
             "learner error (wrong word order, measure word, 了/过 aspect, wrong "
             "collocation, etc.) — ideally involving the given word. The assistant "
             "points out the problem, gives the corrected sentence, then briefly "
-            "explains why in simple terms."
+            "explains why in simple terms, bilingually (Chinese + English). "
+            "No inline pinyin."
         ),
     ),
     TaskSpec(
@@ -116,8 +124,8 @@ TASKS: list[TaskSpec] = [
         instruction=(
             "The user asks to translate a short English sentence (or a Chinese "
             "one to English) that naturally uses the given word. The assistant "
-            "gives the translation plus pinyin for the target word, keeping the "
-            "Chinese at HSK-5 level."
+            "gives the translation and shows both languages, keeping the Chinese "
+            "at HSK-5 level. No inline pinyin."
         ),
     ),
     TaskSpec(
@@ -128,7 +136,8 @@ TASKS: list[TaskSpec] = [
         instruction=(
             "The user asks for a short example dialogue on an everyday topic that "
             "uses the given word. The assistant writes a natural 4–8 line A/B "
-            "dialogue at HSK-5 level, then lists any key words with pinyin."
+            "dialogue at HSK-5 level, with an English translation of each line. "
+            "No inline pinyin."
         ),
     ),
     TaskSpec(
@@ -138,8 +147,9 @@ TASKS: list[TaskSpec] = [
         needs_grammar=True,
         instruction=(
             "The user asks how to use the given HSK-5 grammar point. The assistant "
-            "explains the structure, when to use it, and gives 2–3 example "
-            "sentences at HSK-5 level with short English glosses."
+            "explains the structure and when to use it, and gives 2–3 example "
+            "sentences at HSK-5 level, all with English translations. "
+            "No inline pinyin."
         ),
     ),
 ]

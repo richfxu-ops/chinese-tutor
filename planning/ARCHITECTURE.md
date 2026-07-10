@@ -6,7 +6,8 @@
 - **Language:** Python 3.11+
 - **Data gen:** `anthropic` SDK (Claude teacher model), local on the Mac.
 - **Training:** QLoRA — `transformers`, `peft`, `trl` (`SFTTrainer`), `bitsandbytes` (4-bit), `datasets`, `accelerate`. Runs on **Colab (CUDA GPU)**; bitsandbytes 4-bit is CUDA-only.
-- **Serving/demo:** `gradio` (`ChatInterface`), local on the Mac (MPS/CPU inference of merged model).
+- **Serving/demo:** `gradio` chat (HTML message rendering), local on the Mac (MPS/CPU inference of merged model).
+- **Reading layer:** `pypinyin` (pinyin ruby), `jieba` (word segmentation), bundled **CC-CEDICT** dict (hover glosses). Pure post-processing — no model involvement.
 - **Base model:** `Qwen/Qwen2.5-1.5B-Instruct`.
 
 ## Repo structure
@@ -15,7 +16,8 @@
 - `gen_data.py` — calls Claude to synthesize pairs → `data/train.jsonl`, `data/eval.jsonl`.
 - `train.py` — QLoRA SFT; produces an adapter under `outputs/`. Colab-runnable (thin notebook wrapper).
 - `eval.py` — before/after generation on held-out prompts + a rubric scaffold.
-- `app.py` — Gradio chat UI over the merged model.
+- `annotate.py` — reading layer: CJK text → `<ruby>` pinyin + per-word `title` gloss HTML. Annotates only CJK runs, leaves English untouched. Used by `app.py`.
+- `app.py` — Gradio chat UI over the merged model; renders tutor replies through `annotate.py`.
 - `data/`, `outputs/` — generated artifacts (git-ignored).
 - `planning/` — project docs + task dashboard.
 
