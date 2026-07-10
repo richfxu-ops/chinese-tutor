@@ -30,10 +30,11 @@ def main() -> None:
     print(f"loading base {c.BASE_MODEL} in fp16...")
     base = AutoModelForCausalLM.from_pretrained(
         c.BASE_MODEL, torch_dtype=torch.float16, device_map="auto",
+        offload_folder="offload",   # spill to disk when GPU+RAM can't hold the 7B (e.g. T4)
     )
     print(f"applying adapter from {args.adapter_dir} and merging...")
-    model = PeftModel.from_pretrained(base, args.adapter_dir)
-    model = model.merge_and_unload()          # fold LoRA weights into the base
+    model = PeftModel.from_pretrained(base, args.adapter_dir, offload_folder="offload")
+    model = model.merge_and_unload()          # fold LoRA weights into the base (handles offload)
 
     model.save_pretrained(args.out, safe_serialization=True)
     AutoTokenizer.from_pretrained(c.BASE_MODEL).save_pretrained(args.out)
