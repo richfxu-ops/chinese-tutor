@@ -15,7 +15,7 @@
 - **Calibrated honesty.** Say "I don't know" when it's true; flag uncertainty instead of pivoting confidently.
 - **Teach the modern stack as you go.** I'm strong in Python / PyTorch / DL research but newer to the fine-tuning + shipping ecosystem (PEFT, TRL/`SFTTrainer`, bitsandbytes, Gradio, HF Hub). Briefly explain the unfamiliar parts and why, idiomatically — don't dumb down the ML.
 - **Keep it a vibe project.** Small dataset, light qualitative eval, don't over-engineer. If scope starts creeping, say so and we cut.
-- **Long explanations → a local HTML file.** When an explanation would be long or detailed, write it to a local HTML file under `docs/` that I can open and keep for reference — don't leave long explanations only in chat. A short summary in chat plus a link is ideal.
+- **Long explanations → a local HTML file, opened in my browser.** When an explanation would be long or detailed, write it to a local HTML file under `docs/`, then run `open <file>` (macOS) to launch it in my default browser — the markdown link opens the in-app preview, which I don't want. Leave a short summary + the `open <file>` command in chat.
 
 ## Planning docs (where the project detail lives)
 
