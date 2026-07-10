@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Running the training on Colab — step by step</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .step { display:flex; gap:1rem; margin:1.4rem 0; }
+  .step .n { flex:none; width:2rem; height:2rem; display:grid; place-items:center; border-radius:50%; background:var(--ink); color:var(--ground); font-family:var(--mono); font-weight:600; font-size:.9rem; }
+  .step .body { flex:1; }
+  .step .body h3 { margin:.15rem 0 .4rem; }
+  .path { font-family:var(--mono); font-size:.85em; background:var(--surface-2); border:1px solid var(--line); padding:.05rem .35rem; border-radius:4px; white-space:nowrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="crumb"><a href="index.html">← docs</a></p>
+  <p class="eyebrow">Training · walkthrough</p>
+  <h1>Running the training on Colab</h1>
+  <p class="lead">A first-timer's guide. Google Colab is a free/paid service that runs Jupyter notebooks on a cloud GPU, in your browser. We use it because training needs an NVIDIA GPU your Mac doesn't have.</p>
+
+  <div class="callout jade"><strong>Before you start</strong>, make sure the data exists locally — you already ran <code>gen_data.py</code>, so <span class="path">data/train.jsonl</span> and <span class="path">data/eval.jsonl</span> are ready. You'll upload 6 files total (below).</div>
+
+  <h2>The 6 files you'll upload</h2>
+  <p>All are in your project folder <span class="path">~/Documents/ml_projects/chinese_tutor</span>:</p>
+  <ul>
+    <li><span class="path">config.py</span>, <span class="path">train.py</span>, <span class="path">eval.py</span>, <span class="path">merge.py</span> — in the top folder</li>
+    <li><span class="path">data/train.jsonl</span>, <span class="path">data/eval.jsonl</span> — in the <span class="path">data/</span> subfolder</li>
+  </ul>
+
+  <h2>Steps</h2>
+
+  <div class="step"><div class="n">1</div><div class="body">
+    <h3>Open Colab &amp; load the notebook</h3>
+    <p>Go to <strong>colab.research.google.com</strong> (sign in with your Google account). In the popup: <strong>File → Upload notebook</strong> (or the <em>Upload</em> tab), and pick <span class="path">train_colab.ipynb</span> from your project folder. It opens as an interactive notebook — a column of "cells" you run top to bottom.</p>
+  </div></div>
+
+  <div class="step"><div class="n">2</div><div class="body">
+    <h3>Turn on the GPU</h3>
+    <p>This is the one setting that matters. <strong>Runtime → Change runtime type</strong> → under <em>Hardware accelerator</em> pick <strong>GPU</strong>. Since you have paid Colab, choose <strong>L4</strong> or <strong>A100</strong> if offered (a free <strong>T4</strong> also works, just slower). Click <strong>Save</strong>.</p>
+    <div class="callout">If you skip this, <code>train.py</code> will stop with a clear "No CUDA GPU" message — that's the guard we built in, not a bug.</div>
+  </div></div>
+
+  <div class="step"><div class="n">3</div><div class="body">
+    <h3>Run a cell</h3>
+    <p>Hover over a cell and click the <strong>▶ play button</strong> on its left (or press <strong>Shift+Enter</strong>). Run the cells <strong>in order, top to bottom</strong>. A spinner means it's working; a green check means done. If Colab warns "notebook was not authored by Google", click <strong>Run anyway</strong>.</p>
+  </div></div>
+
+  <div class="step"><div class="n">4</div><div class="body">
+    <h3>Cells 1–3: check GPU, install, upload files</h3>
+    <ul>
+      <li><strong>Cell 1</strong> (<code>!nvidia-smi</code>) prints your GPU. If it errors, the GPU isn't on — redo step 2.</li>
+      <li><strong>Cell 2</strong> installs the training libraries (~1–2 min).</li>
+      <li><strong>Cell 3</strong> shows a <strong>"Choose Files"</strong> button. Click it and select all <strong>6 files</strong> at once (⌘-click to multi-select). It prints what it received — confirm you see the 4 <code>.py</code> files and both <code>.jsonl</code>.</li>
+    </ul>
+  </div></div>
+
+  <div class="step"><div class="n">4½</div><div class="body">
+    <h3>Cell 4: the sanity run — <em>pause here</em></h3>
+    <p>This runs 20 quick training steps to prove everything works. <strong>Watch the printed <code>loss</code></strong> — it should <strong>trend downward</strong> over the steps. First it downloads Qwen (~a few minutes, one time), then trains.</p>
+    <div class="callout seal"><strong>Stop and check with me before continuing.</strong> Copy the loss numbers to me. If loss goes down → we're good, run the full train. If it's flat or shows "NaN", that's the assistant-masking template — I'll fix it before you spend an hour training.</div>
+  </div></div>
+
+  <div class="step"><div class="n">5</div><div class="body">
+    <h3>Cell 5: the full training run</h3>
+    <p>The real fine-tune — <strong>~30–60 minutes</strong>. It prints the loss every 10 steps and runs an eval each epoch. <strong>Keep the tab open</strong> and check on it occasionally (Colab disconnects idle sessions). When it finishes it prints <code>adapter saved</code>.</p>
+  </div></div>
+
+  <div class="step"><div class="n">6</div><div class="body">
+    <h3>Cell 6: eval (optional but recommended)</h3>
+    <p>Generates base-vs-tuned answers on held-out prompts → <code>eval_report.md</code>. This is the payoff — where you see if the tutor actually improved. Send me the output.</p>
+  </div></div>
+
+  <div class="step"><div class="n">7</div><div class="body">
+    <h3>Cells 7–8: merge &amp; package</h3>
+    <p><strong>Cell 7</strong> folds the trained adapter into the model. <strong>Cell 8</strong> converts it to the small GGUF file your Mac runs (builds llama.cpp, ~a few minutes). No input needed — just run them.</p>
+  </div></div>
+
+  <div class="step"><div class="n">8</div><div class="body">
+    <h3>Cell 9: download the model</h3>
+    <p>This downloads <span class="path">hsk5-tutor-q4_k_m.gguf</span> (~4.7 GB) to your computer. Move it into your project's <span class="path">outputs/</span> folder. That's the file <code>app.py</code> loads — you're done on Colab.</p>
+  </div></div>
+
+  <h2>Common hiccups</h2>
+  <table>
+    <thead><tr><th>Problem</th><th>Fix</th></tr></thead>
+    <tbody>
+      <tr><td>"No CUDA GPU" error</td><td>GPU runtime isn't on — step 2, then re-run from the top.</td></tr>
+      <tr><td>Session disconnected</td><td>Colab drops idle sessions. Reconnect (top-right), but you'll need to re-run from cell 1 (uploaded files are lost on disconnect). For a ~1hr run, just don't close the tab.</td></tr>
+      <tr><td>"You are not subscribed…" / no L4/A100</td><td>Pick T4 — it works fine for a 7B QLoRA, just slower.</td></tr>
+      <tr><td>Out-of-memory during training</td><td>Rare on L4/A100; on a T4 tell me and I'll lower the batch size in <code>config.py</code>.</td></tr>
+      <tr><td>Download is slow</td><td>Normal — it's ~4.7 GB. Let it finish.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout jade"><strong>Checkpoints — what to send me:</strong> (1) the <strong>sanity-run loss</strong> (before the full run), (2) the <strong>full-run final loss</strong>, (3) the <strong>eval report</strong>. I'll interpret each and we fix anything that comes up.</div>
+
+  <div class="foot">chinese_tutor · reference doc · training walkthrough</div>
+</div>
+</body>
+</html>
