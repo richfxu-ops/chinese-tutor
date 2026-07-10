@@ -97,6 +97,15 @@ No markdown, no commentary."""
 _JSON_ARRAY_RE = re.compile(r"\[.*\]", re.DOTALL)
 
 
+def response_text(resp) -> str:
+    """Concatenate the text blocks of a message, skipping thinking blocks.
+
+    Sonnet 5 returns a ThinkingBlock before the TextBlock, so we can't just take
+    content[0] — we filter to the text blocks.
+    """
+    return "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+
+
 def extract_json_array(text: str) -> list[dict]:
     """Pull the JSON array out of a teacher response, tolerating stray prose or
     ```json fences."""
@@ -138,7 +147,7 @@ def generate_batch(client, task: c.TaskSpec, items: list[str], retries: int = 2)
                 temperature=c.GEN_TEMPERATURE,
                 messages=[{"role": "user", "content": prompt}],
             )
-            pairs = extract_json_array(resp.content[0].text)
+            pairs = extract_json_array(response_text(resp))
             return to_records(task, items, pairs)
         except Exception as e:  # noqa: BLE001 — never let one bad batch (API error,
             last_err = e        # rate limit, odd response shape) kill the whole paid run

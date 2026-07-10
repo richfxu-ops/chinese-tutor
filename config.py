@@ -57,8 +57,8 @@ SYSTEM_PROMPT = (
 # --------------------------------------------------------------------------- #
 EVAL_FRACTION = 0.10          # held out per task for before/after eval
 EXAMPLES_PER_CALL = 5         # ask the teacher for N examples per API call
-GEN_TEMPERATURE = 1.0         # some variety in the synthetic data
-GEN_MAX_TOKENS = 2048         # teacher response cap per call
+GEN_TEMPERATURE = 1.0         # some variety (also required=1 when the teacher thinks)
+GEN_MAX_TOKENS = 4096         # per call — headroom for thinking + 5 bilingual examples
 
 
 @dataclass(frozen=True)

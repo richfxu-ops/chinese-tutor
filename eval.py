@@ -118,10 +118,10 @@ def judge(results: list[dict]) -> None:
         )
         try:
             resp = client.messages.create(
-                model=c.TEACHER_MODEL, max_tokens=400, temperature=0,
+                model=c.TEACHER_MODEL, max_tokens=1024, temperature=1,
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = resp.content[0].text
+            text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
             data = json.loads(text[text.index("{"): text.rindex("}") + 1])
             a_scores, b_scores = data.get("A", {}), data.get("B", {})
             winner = {"A": "base", "B": "tuned", "tie": "tie"}.get(data.get("winner"), "tie")
