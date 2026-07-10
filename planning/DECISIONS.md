@@ -2,6 +2,12 @@
 
 > Dated log of notable choices and *why*, so rationale isn't lost. Newest first.
 
+## 2026-07-10 — Roadmap: two-model curriculum architecture (Claude planner + Qwen executor)
+- **Decision:** Learning-goal / curriculum planning is done by a capable model with memory + reasoning (Claude), **not** by the fine-tuned Qwen. Claude discusses goals with the user and writes a persisted `curriculum.md` (and a companion `progress.md`); `app.py` loads `curriculum.md` and injects it into Qwen's system prompt each session. Qwen stays the fast, local, HSK-5 drill tutor.
+- **Why:** Qwen is small and has no filesystem / long-term memory — it *executes* tutoring well but shouldn't *plan*. A curriculum is specific and changes often → belongs in **context**, not weights. The `curriculum.md` / `progress.md` files are the shared long-term memory between the planner (Claude) and the executor (Qwen). Standard "planner + specialized executor with a shared state file" pattern.
+- **Implications:** v2 **app-layer** feature only — read `curriculum.md` → inject into the system prompt. **No change to training or data** (Qwen2.5-7B-Instruct already follows in-context instructions). Possible later automation: a scheduled Claude review that rewrites `curriculum.md` from `progress.md`.
+
+
 ## 2026-07-09 — Product spec v1 locked (D1–D7)
 - **Decision:** Fully **bilingual** output (D1). Pinyin + per-word English gloss are an **app-side reading layer**, not model output (D2): `pypinyin` renders pinyin ruby over every character, `jieba` segments words, bundled **CC-CEDICT** supplies hover glosses, rendered as HTML `<ruby>` + `title` tooltips. Single-turn training data (D3). No quiz mode in v1 (D4). Above-level requests simplified + flagged (D5). Simplified characters only (D6). Gradio chat + starter buttons (D7). **Voice chat + TTS deferred to v2 roadmap.**
 - **Why:** A 1.5B model shouldn't generate per-character pinyin (verbose, error-prone) — a library is always correct and needs zero training data. Bilingual is the only content change; the reading layer is pure rendering. Keeps v1 small while delivering the headline "readable" feature.
