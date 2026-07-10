@@ -4,8 +4,6 @@
 > columns are `## ` headings; tasks are `- [ ]` / `- [x]`; optional `(P0)`–`(P3)` priority and `#tags`.
 
 ## Backlog
-- [ ] (P1) train.py — QLoRA SFT (4-bit base + PEFT LoRA + TRL SFTTrainer), save adapter #train #M2
-- [ ] (P2) Colab notebook wrapper to run train.py on GPU #train #M2
 - [ ] (P1) eval.py — before/after on held-out prompts + rubric scaffold #eval #M2
 - [ ] (P1) annotate.py — reading layer: pypinyin ruby + jieba/CC-CEDICT hover gloss → HTML #ship #M3
 - [ ] (P2) Bundle CC-CEDICT + README attribution (CC-BY-SA) #ship #M3
@@ -30,3 +28,6 @@
 - [x] requirements.txt (local) + requirements-train.txt (Colab) + .gitignore #infra #M1
 - [x] Product spec v1 locked (D1–D7): bilingual + app-side reading layer #data #M1
 - [x] gen_data.py — Claude teacher → train.jsonl / eval.jsonl (dry-run verified) #data #M1
+- [x] Base model → Qwen2.5-7B-Instruct #train #M2
+- [x] train.py — QLoRA SFT (4-bit base + LoRA + TRL SFTTrainer), save adapter #train #M2
+- [x] train_colab.ipynb — GPU notebook wrapper (upload → train → download adapter) #train #M2
