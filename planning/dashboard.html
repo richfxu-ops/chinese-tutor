@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Task Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel-2: #1e222b; --border: #2a2f3a;
+    --text: #e6e8ec; --muted: #9aa3b2; --accent: #5b9dff;
+    --p0: #ff5d5d; --p1: #ff9f43; --p2: #5b9dff; --p3: #7a8190;
+    --done: #34c759; --chip: #232833;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --border: #e2e6ec;
+      --text: #1b1f27; --muted: #5b6675; --accent: #2f6df6; --chip: #eef1f5;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  header { padding: 20px 24px 12px; }
+  .title { font-size: 22px; font-weight: 700; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 24px 4px; }
+  .toolbar input[type=search] { background: var(--panel); border: 1px solid var(--border); color: var(--text);
+    padding: 7px 10px; border-radius: 8px; min-width: 200px; }
+  button { background: var(--panel); border: 1px solid var(--border); color: var(--text);
+    padding: 7px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+  button:hover { border-color: var(--accent); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 24px; }
+  .chip { background: var(--chip); border: 1px solid var(--border); color: var(--muted);
+    padding: 4px 10px; border-radius: 999px; cursor: pointer; font-size: 12px; }
+  .chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .progress-wrap { padding: 4px 24px 12px; }
+  .bar { height: 10px; background: var(--panel-2); border-radius: 999px; overflow: hidden; border: 1px solid var(--border); }
+  .bar > span { display: block; height: 100%; background: var(--done); width: 0; transition: width .4s ease; }
+  .stats { display: flex; gap: 18px; flex-wrap: wrap; color: var(--muted); font-size: 13px; margin-top: 8px; }
+  .stats b { color: var(--text); }
+  .board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(260px, 1fr);
+    gap: 14px; padding: 8px 24px 32px; overflow-x: auto; align-items: start; }
+  .col { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
+  .col h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+    margin: 2px 4px 12px; display: flex; justify-content: space-between; }
+  .col h2 .count { background: var(--panel-2); border-radius: 999px; padding: 1px 8px; font-size: 12px; }
+  .card { background: var(--panel-2); border: 1px solid var(--border); border-left: 3px solid var(--p3);
+    border-radius: 9px; padding: 10px 12px; margin-bottom: 9px; }
+  .card.p0 { border-left-color: var(--p0); } .card.p1 { border-left-color: var(--p1); }
+  .card.p2 { border-left-color: var(--p2); } .card.p3 { border-left-color: var(--p3); }
+  .card.done .ttl { text-decoration: line-through; color: var(--muted); }
+  .card .ttl { font-size: 14px; }
+  .card .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+  .badge { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 6px; color: #fff; }
+  .badge.p0 { background: var(--p0); } .badge.p1 { background: var(--p1); }
+  .badge.p2 { background: var(--p2); } .badge.p3 { background: var(--p3); }
+  .tag { font-size: 11px; color: var(--accent); background: var(--chip); padding: 1px 7px; border-radius: 6px; }
+  .id { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; }
+  .empty { color: var(--muted); font-size: 13px; padding: 6px 4px; }
+  .notice { margin: 24px; padding: 16px 18px; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; color: var(--muted); }
+  .notice code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; color: var(--text); }
+  .notice b { color: var(--text); }
+</style>
+</head>
+<body>
+<header>
+  <h1 class="title" id="proj">Task Dashboard</h1>
+  <div class="sub" id="updated">Reading TASKS.md…</div>
+</header>
+
+<div class="toolbar">
+  <input type="search" id="search" placeholder="Search tasks…" />
+  <button id="reload">↻ Reload</button>
+  <button id="pickbtn">Load TASKS.md…</button>
+  <input type="file" id="picker" accept=".md,text/markdown,text/plain" style="display:none" />
+  <button id="clearfilters">Clear filters</button>
+</div>
+<div class="chips" id="chips"></div>
+
+<div class="progress-wrap">
+  <div class="bar"><span id="barfill"></span></div>
+  <div class="stats" id="stats"></div>
+</div>
+
+<div id="content"></div>
+
+<script>
+const STANDARD = ["Backlog", "Next", "In Progress", "Done"];
+let STATE = { columns: [], title: "Task Dashboard", selectedTags: new Set(), search: "" };
+
+function parseTasks(md) {
+  const lines = md.split(/\r?\n/);
+  let title = "Task Dashboard";
+  const columns = [];
+  let cur = null;
+  const titleMatch = md.match(/^#\s+(.+?)\s*$/m);
+  if (titleMatch) title = titleMatch[1];
+
+  for (const line of lines) {
+    const h2 = line.match(/^##\s+(.+?)\s*$/);
+    if (h2) { cur = { name: h2[1].trim(), tasks: [] }; columns.push(cur); continue; }
+    const t = line.match(/^\s*[-*]\s*\[([ xX~])\]\s*(.+?)\s*$/);
+    if (t && cur) {
+      let text = t[2];
+      const checked = /[xX]/.test(t[1]);
+      const colDone = cur.name.toLowerCase() === "done";
+      const priM = text.match(/\((P[0-3])\)/i);
+      const priority = priM ? priM[1].toUpperCase() : null;
+      const tags = [...text.matchAll(/#([\w-]+)/g)].map(m => m[1]);
+      const idM = text.match(/^([A-Za-z]{1,6}\d+|\d+\.)\s+/);
+      const id = idM ? idM[1] : null;
+      let ttl = text
+        .replace(/\((P[0-3])\)/i, "")
+        .replace(/#[\w-]+/g, "")
+        .replace(/^([A-Za-z]{1,6}\d+|\d+\.)\s+/, "")
+        .replace(/\s{2,}/g, " ").trim();
+      cur.tasks.push({ title: ttl || text.trim(), done: checked || colDone, priority, tags, id });
+    }
+  }
+  return { title, columns };
+}
+
+function orderColumns(columns) {
+  const byName = {}; columns.forEach(c => byName[c.name.toLowerCase()] = c);
+  const ordered = [];
+  STANDARD.forEach(n => { const c = byName[n.toLowerCase()]; if (c) { ordered.push(c); delete byName[n.toLowerCase()]; } });
+  columns.forEach(c => { if (byName[c.name.toLowerCase()]) ordered.push(c); });
+  return ordered;
+}
+
+function allTags(columns) {
+  const s = new Set();
+  columns.forEach(c => c.tasks.forEach(t => t.tags.forEach(tag => s.add(tag))));
+  return [...s].sort();
+}
+
+function visible(task) {
+  const { selectedTags, search } = STATE;
+  if (selectedTags.size && !task.tags.some(t => selectedTags.has(t))) return false;
+  if (search && !task.title.toLowerCase().includes(search.toLowerCase())) return false;
+  return true;
+}
+
+function render() {
+  const columns = orderColumns(STATE.columns);
+  document.getElementById("proj").textContent = STATE.title;
+
+  let total = 0, done = 0;
+  STATE.columns.forEach(c => c.tasks.forEach(t => { total++; if (t.done) done++; }));
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  document.getElementById("barfill").style.width = pct + "%";
+  const open = total - done;
+  document.getElementById("stats").innerHTML =
+    `<span><b>${pct}%</b> complete</span><span><b>${open}</b> open</span>` +
+    `<span><b>${done}</b> done</span><span><b>${total}</b> total</span>`;
+
+  // chips
+  const chipBox = document.getElementById("chips");
+  chipBox.innerHTML = "";
+  allTags(STATE.columns).forEach(tag => {
+    const el = document.createElement("span");
+    el.className = "chip" + (STATE.selectedTags.has(tag) ? " active" : "");
+    el.textContent = "#" + tag;
+    el.onclick = () => { STATE.selectedTags.has(tag) ? STATE.selectedTags.delete(tag) : STATE.selectedTags.add(tag); render(); };
+    chipBox.appendChild(el);
+  });
+
+  // board
+  const board = document.createElement("div");
+  board.className = "board";
+  columns.forEach(col => {
+    const shown = col.tasks.filter(visible);
+    const c = document.createElement("div");
+    c.className = "col";
+    c.innerHTML = `<h2>${escapeHtml(col.name)} <span class="count">${shown.length}</span></h2>`;
+    if (!shown.length) {
+      const e = document.createElement("div"); e.className = "empty"; e.textContent = "—"; c.appendChild(e);
+    }
+    shown.forEach(t => {
+      const card = document.createElement("div");
+      const pcls = t.priority ? t.priority.toLowerCase() : "p3";
+      card.className = "card " + pcls + (t.done ? " done" : "");
+      const meta = [];
+      if (t.priority) meta.push(`<span class="badge ${pcls}">${t.priority}</span>`);
+      if (t.id) meta.push(`<span class="id">${escapeHtml(t.id)}</span>`);
+      t.tags.forEach(tag => meta.push(`<span class="tag">#${escapeHtml(tag)}</span>`));
+      card.innerHTML = `<div class="ttl">${escapeHtml(t.title)}</div>` +
+        (meta.length ? `<div class="meta">${meta.join("")}</div>` : "");
+      c.appendChild(card);
+    });
+    board.appendChild(c);
+  });
+  const content = document.getElementById("content");
+  content.innerHTML = "";
+  content.appendChild(board);
+}
+
+function escapeHtml(s) { return s.replace(/[&<>"']/g, m => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m])); }
+
+function load(md, sourceLabel) {
+  const parsed = parseTasks(md);
+  STATE.columns = parsed.columns;
+  STATE.title = parsed.title;
+  document.getElementById("updated").textContent =
+    (sourceLabel || "Loaded") + " · " + new Date().toLocaleString();
+  render();
+}
+
+function showNotice() {
+  document.getElementById("content").innerHTML =
+    `<div class="notice"><b>Couldn't read TASKS.md directly.</b><br>
+    Browsers block local file reads over <code>file://</code>. Serve the folder instead:<br><br>
+    <code>cd planning &amp;&amp; python3 -m http.server 8000</code><br>
+    then open <code>http://localhost:8000/dashboard.html</code>.<br><br>
+    Or use <b>Load TASKS.md…</b> above to pick the file manually.</div>`;
+  document.getElementById("updated").textContent = "TASKS.md not loaded";
+}
+
+async function fetchTasks() {
+  try {
+    const res = await fetch("TASKS.md", { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    load(await res.text(), "Fetched TASKS.md");
+  } catch (e) {
+    showNotice();
+  }
+}
+
+document.getElementById("reload").onclick = fetchTasks;
+document.getElementById("clearfilters").onclick = () => { STATE.selectedTags.clear(); STATE.search = ""; document.getElementById("search").value = ""; render(); };
+document.getElementById("search").oninput = (e) => { STATE.search = e.target.value; render(); };
+document.getElementById("pickbtn").onclick = () => document.getElementById("picker").click();
+document.getElementById("picker").onchange = (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => load(r.result, "Loaded " + f.name);
+  r.readAsText(f);
+};
+
+fetchTasks();
+</script>
+</body>
+</html>
