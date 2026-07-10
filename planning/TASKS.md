@@ -4,7 +4,6 @@
 > columns are `## ` headings; tasks are `- [ ]` / `- [x]`; optional `(P0)`–`(P3)` priority and `#tags`.
 
 ## Backlog
-- [ ] (P1) eval.py — before/after on held-out prompts + rubric scaffold #eval #M2
 - [ ] (P1) annotate.py — reading layer: pypinyin ruby + jieba/CC-CEDICT hover gloss → HTML #ship #M3
 - [ ] (P2) Bundle CC-CEDICT + README attribution (CC-BY-SA) #ship #M3
 - [ ] (P2) Merge adapter into base 7B, then quantize for local serving (GGUF/llama.cpp or MLX) #ship #M3
@@ -31,3 +30,4 @@
 - [x] Base model → Qwen2.5-7B-Instruct #train #M2
 - [x] train.py — QLoRA SFT (4-bit base + LoRA + TRL SFTTrainer), save adapter #train #M2
 - [x] train_colab.ipynb — GPU notebook wrapper (upload → train → download adapter) #train #M2
+- [x] eval.py — base vs tuned before/after + optional Claude-judge rubric #eval #M2
