@@ -1,0 +1,7 @@
+# Local deps (Apple Silicon): data generation + eval + Gradio demo.
+# Training deps are separate — see requirements-train.txt (Colab/CUDA only).
+anthropic>=0.40
+transformers>=4.46
+torch>=2.4
+accelerate>=1.0
+gradio>=4.44

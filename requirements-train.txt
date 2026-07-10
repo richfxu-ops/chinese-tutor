@@ -1,0 +1,9 @@
+# Training deps — QLoRA on Colab (CUDA GPU). bitsandbytes 4-bit is CUDA-only,
+# so do NOT install these on the Mac. On Colab, torch/transformers are usually
+# preinstalled; installing this file tops up the rest.
+transformers>=4.46
+peft>=0.13
+trl>=0.12
+bitsandbytes>=0.44
+accelerate>=1.0
+datasets>=3.0

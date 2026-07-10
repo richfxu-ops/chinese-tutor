@@ -14,14 +14,14 @@
 - [ ] (P3) Decide: keep 1.5B or bump to 3B (after M2 eval) #train
 
 ## Next
-- [ ] (P1) config.py — single source of truth (model ids, paths, hyperparams, tasks, system prompt) #data #M1
-- [ ] (P1) hsk5_vocab.txt + hsk5_grammar.txt — curated HSK-5 seed #data #M1
 - [ ] (P1) gen_data.py — Claude teacher → train.jsonl / eval.jsonl #data #M1
-- [ ] (P2) requirements.txt + .gitignore (data/, outputs/, keys) #infra #M1
 
 ## In Progress
-- [ ] Scaffold repo (CLAUDE.md + planning/ + dashboard) #infra
 
 ## Done
 - [x] Initialize repository + feature branch (feat/hsk5-tutor)
 - [x] Plan approved: QLoRA-on-Colab, Qwen2.5-1.5B-Instruct, Claude teacher, ~800–1k pairs
+- [x] Scaffold repo (CLAUDE.md + planning/ + dashboard) + GitHub remote #infra
+- [x] config.py — single source of truth (models, paths, tasks, system prompt, TrainConfig) #data #M1
+- [x] hsk5_vocab.txt (161) + hsk5_grammar.txt (42) — curated HSK-5 seed #data #M1
+- [x] requirements.txt (local) + requirements-train.txt (Colab) + .gitignore #infra #M1

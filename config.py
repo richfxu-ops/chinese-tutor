@@ -1,0 +1,178 @@
+"""Single source of truth for the HSK-5 tutor project.
+
+Imported by gen_data.py, train.py, eval.py and app.py so every stage shares the
+same model ids, paths, tutor persona and task definitions. Keep configuration
+here — the scripts stay thin.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+# --------------------------------------------------------------------------- #
+# Paths
+# --------------------------------------------------------------------------- #
+ROOT = Path(__file__).resolve().parent
+DATA_DIR = ROOT / "data"
+OUTPUT_DIR = ROOT / "outputs"          # adapter + merged model land here
+VOCAB_FILE = ROOT / "hsk5_vocab.txt"
+GRAMMAR_FILE = ROOT / "hsk5_grammar.txt"
+
+TRAIN_FILE = DATA_DIR / "train.jsonl"
+EVAL_FILE = DATA_DIR / "eval.jsonl"
+
+# --------------------------------------------------------------------------- #
+# Models
+# --------------------------------------------------------------------------- #
+BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"     # student model we fine-tune
+TEACHER_MODEL = "claude-sonnet-5"             # generates the synthetic data
+HSK_LEVEL = 5
+
+# The tutor persona. Used as the `system` message in EVERY training example and
+# again at inference in app.py — so the model is trained on the exact behaviour
+# we ask of it at serve time. Keep them identical.
+SYSTEM_PROMPT = (
+    "你是一位耐心、鼓励学生的中文老师，学生的中文水平大约是 HSK 5（中高级）。"
+    "请遵守以下原则：\n"
+    "- 用简体中文回答，语言控制在 HSK 5 或以下，尽量不用超纲的词汇和语法；"
+    "确实需要用较难的词时，附上拼音和简短解释。\n"
+    "- 例句和对话要自然、地道，长度适中。\n"
+    "- 纠错时，先指出问题，再给出修改后的句子，最后简单说明原因。\n"
+    "- 解释词语或语法时，给出拼音、词性、简明定义和一到两个例句。\n"
+    "- 语气友好、简洁，多鼓励，不要长篇大论。"
+)
+
+# --------------------------------------------------------------------------- #
+# Data generation
+# --------------------------------------------------------------------------- #
+EVAL_FRACTION = 0.10          # held out per task for before/after eval
+EXAMPLES_PER_CALL = 5         # ask the teacher for N examples per API call
+GEN_TEMPERATURE = 1.0         # some variety in the synthetic data
+GEN_MAX_TOKENS = 2048         # teacher response cap per call
+
+
+@dataclass(frozen=True)
+class TaskSpec:
+    """One tutoring task type the model learns.
+
+    `n`             how many examples to generate for this task
+    `needs_vocab`   sample seed word(s) from hsk5_vocab.txt into the prompt
+    `needs_grammar` sample a grammar point from hsk5_grammar.txt into the prompt
+    `instruction`   what we tell the teacher to produce (the user turn + the
+                    ideal assistant turn). Kept as data so gen_data.py stays thin.
+    """
+
+    name: str
+    n: int
+    needs_vocab: bool
+    needs_grammar: bool
+    instruction: str
+
+
+# Six task types, ~900 examples total. Counts are deliberately uneven — the
+# correction/explanation tasks are the ones a learner leans on most.
+TASKS: list[TaskSpec] = [
+    TaskSpec(
+        name="explain_word",
+        n=180,
+        needs_vocab=True,
+        needs_grammar=False,
+        instruction=(
+            "The user asks what a given HSK-5 word means. The assistant explains "
+            "it: pinyin, part of speech, a concise definition, and 1–2 natural "
+            "example sentences at HSK-5 level."
+        ),
+    ),
+    TaskSpec(
+        name="use_in_sentence",
+        n=150,
+        needs_vocab=True,
+        needs_grammar=False,
+        instruction=(
+            "The user asks for the given word to be used in a sentence (or a few). "
+            "The assistant gives 1–3 natural HSK-5-level sentences using the word, "
+            "each with pinyin for the target word and a short English gloss."
+        ),
+    ),
+    TaskSpec(
+        name="correct_sentence",
+        n=180,
+        needs_vocab=True,
+        needs_grammar=False,
+        instruction=(
+            "The user submits a Chinese sentence that contains a realistic "
+            "learner error (wrong word order, measure word, 了/过 aspect, wrong "
+            "collocation, etc.) — ideally involving the given word. The assistant "
+            "points out the problem, gives the corrected sentence, then briefly "
+            "explains why in simple terms."
+        ),
+    ),
+    TaskSpec(
+        name="translate",
+        n=150,
+        needs_vocab=True,
+        needs_grammar=False,
+        instruction=(
+            "The user asks to translate a short English sentence (or a Chinese "
+            "one to English) that naturally uses the given word. The assistant "
+            "gives the translation plus pinyin for the target word, keeping the "
+            "Chinese at HSK-5 level."
+        ),
+    ),
+    TaskSpec(
+        name="example_dialogue",
+        n=120,
+        needs_vocab=True,
+        needs_grammar=False,
+        instruction=(
+            "The user asks for a short example dialogue on an everyday topic that "
+            "uses the given word. The assistant writes a natural 4–8 line A/B "
+            "dialogue at HSK-5 level, then lists any key words with pinyin."
+        ),
+    ),
+    TaskSpec(
+        name="grammar_point",
+        n=120,
+        needs_vocab=False,
+        needs_grammar=True,
+        instruction=(
+            "The user asks how to use the given HSK-5 grammar point. The assistant "
+            "explains the structure, when to use it, and gives 2–3 example "
+            "sentences at HSK-5 level with short English glosses."
+        ),
+    ),
+]
+
+# --------------------------------------------------------------------------- #
+# Training (QLoRA — consumed by train.py on Colab)
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class TrainConfig:
+    # LoRA
+    lora_r: int = 16
+    lora_alpha: int = 32
+    lora_dropout: float = 0.05
+    # Qwen2 attention + MLP projections — the standard LoRA targets.
+    target_modules: tuple[str, ...] = (
+        "q_proj", "k_proj", "v_proj", "o_proj",
+        "gate_proj", "up_proj", "down_proj",
+    )
+    # 4-bit base (bitsandbytes, CUDA-only → this runs on Colab)
+    load_in_4bit: bool = True
+    bnb_4bit_quant_type: str = "nf4"
+    bnb_4bit_use_double_quant: bool = True
+    bnb_4bit_compute_dtype: str = "bfloat16"
+    # SFT
+    max_seq_len: int = 1024
+    epochs: int = 3
+    lr: float = 2e-4
+    per_device_batch_size: int = 8
+    grad_accum_steps: int = 2          # effective batch 16
+    warmup_ratio: float = 0.03
+    lr_scheduler: str = "cosine"
+    logging_steps: int = 10
+    seed: int = 42
+
+
+TRAIN = TrainConfig()
