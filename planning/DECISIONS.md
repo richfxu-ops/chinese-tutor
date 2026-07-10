@@ -2,6 +2,11 @@
 
 > Dated log of notable choices and *why*, so rationale isn't lost. Newest first.
 
+## 2026-07-10 — Roadmap: Anki flashcard export (app-layer, reuse the reading layer)
+- **Decision:** Extract vocab and export to Anki at the **app layer**, reusing the reading-layer primitives (jieba segmentation + pypinyin + CC-CEDICT). Selection: primary = user click-to-collect words on hover; secondary = an "auto-extract" button (jieba content words ∩ CC-CEDICT, minus a basic-word stoplist). Card = word (front) / pinyin + gloss + the example sentence from the conversation (back). Export: **TSV download** for v1 (zero-dep, Anki File→Import); optional `genanki` `.apkg` (styled + cloze) as polish.
+- **Why:** The hover layer already computes word/pinyin/gloss for every token, so a card is ~free. User-chosen words are both easier to build and better pedagogy. Deterministic extraction (jieba/CC-CEDICT) beats an LLM here — faster, reliable, no cost. Do **not** train the tutor to emit a rigid vocab section (keeps responses natural, extraction stays app-side).
+- **Implications:** v2 **app-layer** feature; **no change to training or data**.
+
 ## 2026-07-10 — Roadmap: two-model curriculum architecture (Claude planner + Qwen executor)
 - **Decision:** Learning-goal / curriculum planning is done by a capable model with memory + reasoning (Claude), **not** by the fine-tuned Qwen. Claude discusses goals with the user and writes a persisted `curriculum.md` (and a companion `progress.md`); `app.py` loads `curriculum.md` and injects it into Qwen's system prompt each session. Qwen stays the fast, local, HSK-5 drill tutor.
 - **Why:** Qwen is small and has no filesystem / long-term memory — it *executes* tutoring well but shouldn't *plan*. A curriculum is specific and changes often → belongs in **context**, not weights. The `curriculum.md` / `progress.md` files are the shared long-term memory between the planner (Claude) and the executor (Qwen). Standard "planner + specialized executor with a shared state file" pattern.

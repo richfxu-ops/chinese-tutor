@@ -6,6 +6,7 @@
 ## Backlog
 - [ ] (P3) ~~Optional: deploy to HF Spaces~~ — not feasible for a 7B on free Spaces; local demo only #ship #M3
 - [ ] (P3) v2 roadmap: curriculum coach — Claude writes curriculum.md/progress.md, app.py injects into Qwen prompt (app-layer, no retrain) #roadmap
+- [ ] (P3) v2 roadmap: Anki export — click-to-collect/auto-extract vocab → TSV/.apkg (reuse jieba/pypinyin/CC-CEDICT) #roadmap
 - [ ] (P3) v2 roadmap: text-to-speech + voice chat (ASR) #roadmap
 
 ## Next

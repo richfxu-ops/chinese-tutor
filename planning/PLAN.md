@@ -18,6 +18,7 @@ Fine-tune a small instruct LLM into a Mandarin tutor that answers at a consisten
 - QLoRA adapter merged into the base model → Gradio chat (with the reading layer) → optional HF Spaces.
 - **Roadmap (v2, deferred):**
   - **Curriculum coach** — Claude (planner, has memory) discusses goals + writes `curriculum.md` / `progress.md`; `app.py` injects `curriculum.md` into Qwen's prompt so the tutor drills what you're focused on. App-layer only, no retraining. See DECISIONS 2026-07-10.
+  - **Anki flashcard export** — click-to-collect (or auto-extract) vocab from the conversation → TSV/`.apkg`, reusing the jieba/pypinyin/CC-CEDICT reading layer. App-layer, no retraining. See DECISIONS 2026-07-10.
   - Text-to-speech (read the tutor's Chinese aloud) and voice chat (Whisper-class ASR input).
 
 ## Roadmap (milestones / phases)
