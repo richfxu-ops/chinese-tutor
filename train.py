@@ -36,10 +36,11 @@ RESPONSE_TEMPLATE = "<|im_start|>assistant\n"
 
 
 def compute_dtype():
-    """bf16 on GPUs that support it (Ampere+: A100/L4), fp16 otherwise (Turing: T4).
-    bf16 on a T4 falls back to slow emulation, so fp16 there is both correct and much
-    faster — this is picked at runtime so the same code is fast on any GPU."""
-    if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+    """bf16 on GPUs with native bf16 tensor cores (Ampere+: A100/L4), fp16 otherwise
+    (Turing: T4). Note: `is_bf16_supported()` returns True on a T4 via *emulation*, so
+    we check compute capability directly — bf16 tensor cores are sm_80+ (Ampere+).
+    Picking fp16 on a T4 is both correct and much faster (fp16 uses its tensor cores)."""
+    if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8:
         return torch.bfloat16
     return torch.float16
 

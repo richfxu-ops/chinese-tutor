@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Giving the tutor memory of what you've learned</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <p class="crumb"><a href="index.html">← docs</a></p>
+  <p class="eyebrow">Design · learner memory</p>
+  <h1>Memory of what you've learned</h1>
+  <p class="lead">How the tutor can know what's review vs. new — without blowing the context window.</p>
+
+  <h2>The worry, addressed</h2>
+  <p>"Won't remembering everything I've studied need a huge amount of context?" <strong>No</strong> — <em>if</em> the app injects a compact <strong>summary of your learning state</strong>, not your raw conversation history. Dumping every past message would grow forever and eventually overflow. A summary stays small and flat.</p>
+  <div class="callout jade">The principle (same as everywhere in this project): the model is stateless — the app supplies memory through the prompt. The trick is <strong>summarize + retrieve, never dump</strong>.</div>
+
+  <h2>You already built the memory store</h2>
+  <p>The <strong>flashcard deck</strong> is a record of what you've learned. Each card's SM-2 stats already encode mastery:</p>
+  <table>
+    <thead><tr><th>Card state</th><th>Means</th><th>The tutor should…</th></tr></thead>
+    <tbody>
+      <tr><td>high interval / ease</td><td>you know it well</td><td>not re-explain it (unless asked)</td></tr>
+      <tr><td>lapsed / low interval</td><td>you're shaky on it</td><td>weave it in for review</td></tr>
+      <tr><td>recently added</td><td>new / learning</td><td>reinforce it</td></tr>
+    </tbody>
+  </table>
+  <p>So "what's review vs. new" is <em>already</em> sitting in the deck — no separate tracking system needed.</p>
+
+  <h2>What the app injects (each turn)</h2>
+  <p>A small block prepended to the system prompt, derived from the deck:</p>
+  <pre><code>The learner already knows these words — don't re-explain unless asked:
+  承担, 既然, 规矩, 安慰 …
+Currently reviewing (weave in naturally where it fits):
+  妨碍, 承受 …</code></pre>
+  <ul>
+    <li><strong>Grammar points are few</strong> (a few dozen total) → you can list them all cheaply.</li>
+    <li><strong>Vocabulary is many</strong> (hundreds over time) → don't inject them all every turn. Inject a bounded slice: the words <em>relevant to the current message</em> + the ones <em>due for review</em>, or just a count ("you know ~400 words") plus the relevant handful.</li>
+  </ul>
+
+  <h2>The context math (why it's cheap)</h2>
+  <p>A summary block of ~50–100 words + statuses is only a few hundred tokens. Qwen2.5 handles 32K tokens natively (up to 128K). So even a generous learner profile is a rounding error in the budget. What you must <em>avoid</em> is the unbounded thing — pasting the full transcript of every past session. Cap the injected vocab list (e.g. top-N relevant + all due) and it never grows out of control.</p>
+  <div class="callout"><strong>Rule of thumb:</strong> inject <em>state</em> (a bounded summary), never <em>history</em> (an unbounded log).</div>
+
+  <h2>Who keeps it updated</h2>
+  <ul>
+    <li><strong>App-side, deterministic (enough on its own):</strong> when you add a word to the deck, when the tutor explains a word, when you get a correction wrong — the app updates the deck / a small profile. No LLM, reliable, free.</li>
+    <li><strong>Optional — the Claude coach:</strong> periodically Claude reads your recent sessions + progress and writes higher-level notes to <code>progress.md</code> ("strong on aspect particles, shaky on 把-sentences"). Richer, but needs the coach step from the <a href="how-llms-work.html">curriculum architecture</a>.</li>
+  </ul>
+
+  <h2>How it fits the rest of the roadmap</h2>
+  <p>Three features you've asked about are really <strong>one "learner state"</strong> the app summarizes into the prompt:</p>
+  <table>
+    <thead><tr><th>Feature</th><th>File</th><th>Role in learner state</th></tr></thead>
+    <tbody>
+      <tr><td>Flashcards</td><td>deck (localStorage / JSON)</td><td>what vocab you've seen + mastery</td></tr>
+      <tr><td>Curriculum coach</td><td><code>curriculum.md</code></td><td>what to focus on next</td></tr>
+      <tr><td>Learned-memory (this)</td><td><code>progress.md</code> + deck</td><td>what's review vs. new; don't repeat</td></tr>
+    </tbody>
+  </table>
+  <p>All app-layer. <strong>No retraining</strong> — the model stays a focused tutor; the app decides what state to show it.</p>
+
+  <h2>The one choice to make</h2>
+  <ol>
+    <li><strong>Deck-derived only</strong> — the app builds the "known / reviewing" summary straight from the flashcard deck. Simple, deterministic, free. <em>Recommended start.</em></li>
+    <li><strong>+ Claude progress notes</strong> — add the coach writing <code>progress.md</code> for higher-level strengths/weaknesses. Richer, more moving parts.</li>
+  </ol>
+
+  <div class="foot">chinese_tutor · reference doc · learner memory</div>
+</div>
+</body>
+</html>
