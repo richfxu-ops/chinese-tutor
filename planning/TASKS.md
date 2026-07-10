@@ -9,8 +9,8 @@
 - [ ] (P1) eval.py — before/after on held-out prompts + rubric scaffold #eval #M2
 - [ ] (P1) annotate.py — reading layer: pypinyin ruby + jieba/CC-CEDICT hover gloss → HTML #ship #M3
 - [ ] (P2) Bundle CC-CEDICT + README attribution (CC-BY-SA) #ship #M3
-- [ ] (P2) Merge adapter into base model #ship #M3
-- [ ] (P1) app.py — Gradio chat (HTML render: ruby + title) over merged model #ship #M3
+- [ ] (P2) Merge adapter into base 7B, then quantize for local serving (GGUF/llama.cpp or MLX) #ship #M3
+- [ ] (P1) app.py — Gradio chat (HTML render: ruby + title) over quantized 7B #ship #M3
 - [ ] (P2) README with before/after examples #ship #M3
 - [ ] (P3) Optional: deploy to HF Spaces #ship #M3
 - [ ] (P3) Decide: keep 1.5B or bump to 3B (after M2 eval) #train

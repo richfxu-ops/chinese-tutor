@@ -31,7 +31,7 @@ Fine-tune a small instruct LLM into a Mandarin tutor that answers at a consisten
 
 ## Constraints
 - **Hardware:** Apple Silicon M5 Pro / 24GB (local for data-gen + app); **paid Colab** for the QLoRA training run.
-- **Base model:** Qwen2.5-1.5B-Instruct (strong Chinese, small; 3B is a later one-line bump).
+- **Base model:** Qwen2.5-7B-Instruct (chosen for tutor reliability). Local demo serves it **quantized** (GGUF/llama.cpp or MLX); free HF Spaces can't host a 7B.
 - **Teacher model:** Claude (Anthropic API) for data generation.
 - **Timebox:** ~2–3 sessions. Keep it small.
 

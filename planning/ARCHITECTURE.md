@@ -8,7 +8,8 @@
 - **Training:** QLoRA — `transformers`, `peft`, `trl` (`SFTTrainer`), `bitsandbytes` (4-bit), `datasets`, `accelerate`. Runs on **Colab (CUDA GPU)**; bitsandbytes 4-bit is CUDA-only.
 - **Serving/demo:** `gradio` chat (HTML message rendering), local on the Mac (MPS/CPU inference of merged model).
 - **Reading layer:** `pypinyin` (pinyin ruby), `jieba` (word segmentation), bundled **CC-CEDICT** dict (hover glosses). Pure post-processing — no model involvement.
-- **Base model:** `Qwen/Qwen2.5-1.5B-Instruct`.
+- **Base model:** `Qwen/Qwen2.5-7B-Instruct`.
+- **Local serving:** merged model quantized for Apple Silicon — GGUF via `llama.cpp`/`llama-cpp-python` (~4.5GB 4-bit, snappy) or MLX. Raw bf16 7B on MPS (~15GB) is too slow for the demo. (Serving dep added at M3 once GGUF vs MLX is picked.)
 
 ## Repo structure
 - `config.py` — single source of truth: model ids, paths, HSK level, data-gen + training hyperparams. Imported by `gen_data.py`, `train.py`, `eval.py`, `app.py`.
@@ -46,4 +47,5 @@
 ## Gotchas / notes
 - **bitsandbytes 4-bit is CUDA-only** → `train.py` is a Colab/GPU step, not local Mac.
 - `data/` and `outputs/` are git-ignored; regenerate rather than commit.
-- Inference in `app.py` runs the *merged* model on Apple Silicon (MPS) — no bitsandbytes needed there.
+- `app.py` serves the *merged* 7B **quantized** on Apple Silicon (GGUF/llama.cpp or MLX) — raw bf16 on MPS is too slow. No bitsandbytes at inference.
+- 7B QLoRA on Colab: keep per-device batch small (4) + gradient checkpointing so it fits a 24GB GPU (L4); bump on an A100.

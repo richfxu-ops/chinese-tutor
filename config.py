@@ -25,7 +25,7 @@ EVAL_FILE = DATA_DIR / "eval.jsonl"
 # --------------------------------------------------------------------------- #
 # Models
 # --------------------------------------------------------------------------- #
-BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"     # student model we fine-tune
+BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"       # student model we fine-tune
 TEACHER_MODEL = "claude-sonnet-5"             # generates the synthetic data
 HSK_LEVEL = 5
 
@@ -177,8 +177,11 @@ class TrainConfig:
     max_seq_len: int = 1024
     epochs: int = 3
     lr: float = 2e-4
-    per_device_batch_size: int = 8
-    grad_accum_steps: int = 2          # effective batch 16
+    # 7B in 4-bit: keep per-device batch small so it fits a 24GB Colab GPU
+    # (L4); grad accumulation keeps the effective batch at 16. train.py also
+    # enables gradient checkpointing. Bump the batch up on an A100 if you have one.
+    per_device_batch_size: int = 4
+    grad_accum_steps: int = 4          # effective batch 16
     warmup_ratio: float = 0.03
     lr_scheduler: str = "cosine"
     logging_steps: int = 10

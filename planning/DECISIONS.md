@@ -7,7 +7,12 @@
 - **Why:** A 1.5B model shouldn't generate per-character pinyin (verbose, error-prone) — a library is always correct and needs zero training data. Bilingual is the only content change; the reading layer is pure rendering. Keeps v1 small while delivering the headline "readable" feature.
 - **Implications:** `SYSTEM_PROMPT` + task instructions go bilingual and drop inline pinyin (done). New `annotate.py` module + CC-CEDICT asset (~4MB, CC-BY-SA → README attribution). `app.py` renders HTML (ruby + title). Hover tooltips are desktop-only (no mobile hover) — acceptable for a demo.
 
-## 2026-07-09 — Base model: Qwen2.5-1.5B-Instruct
+## 2026-07-09 — Base model: upgraded to Qwen2.5-7B-Instruct (supersedes 1.5B)
+- **Decision:** Use `Qwen/Qwen2.5-7B-Instruct` as the base, for a genuinely reliable tutor.
+- **Why:** Fine-tuning teaches format + level-control, not Chinese knowledge — so base quality is the ceiling. 7B is markedly more accurate on our tasks (corrections, grammar, natural sentences); a tutor that teaches wrong Chinese is worse than none. QLoRA 4-bit of a 7B is the standard case and trains fine on paid Colab (~30–60 min); only the model id + batch sizing change (per-device batch 4 × accum 4 = eff. 16, gradient checkpointing on).
+- **Implications:** **Local demo must serve the merged model quantized** — GGUF via `llama.cpp` (~4.5GB, snappy) or MLX — not raw bf16 on MPS (~15GB, slow) → new convert-and-serve step in M3. **Free HF Spaces can't run a 7B** (CPU-only); local demo is primary, a public Space would need a paid GPU. Revisit if serving proves annoying (3B is the fallback).
+
+## 2026-07-09 — Base model: Qwen2.5-1.5B-Instruct  [superseded above]
 - **Decision:** Start with `Qwen/Qwen2.5-1.5B-Instruct`, not 3B.
 - **Why:** Strong Chinese for its size; fast train + fast Gradio inference keeps the vibe-project loop tight. 3B is an easy one-line bump if M2 eval shows quality is short.
 - **Implications:** Fast iteration; revisit model size after seeing eval results.
