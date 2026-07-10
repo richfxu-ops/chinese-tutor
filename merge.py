@@ -27,14 +27,22 @@ def main() -> None:
     ap.add_argument("--out", default=str(c.MERGED_DIR), help="where to write the merged fp16 model")
     args = ap.parse_args()
 
-    print(f"loading base {c.BASE_MODEL} in fp16...")
+    use_cuda = torch.cuda.is_available()
+    where = "GPU + disk offload" if use_cuda else "CPU RAM"
+    print(f"loading base {c.BASE_MODEL} in fp16 ({where})...")
     base = AutoModelForCausalLM.from_pretrained(
-        c.BASE_MODEL, torch_dtype=torch.float16, device_map="auto",
-        offload_folder="offload",   # spill to disk when GPU+RAM can't hold the 7B (e.g. T4)
+        c.BASE_MODEL,
+        torch_dtype=torch.float16,
+        low_cpu_mem_usage=True,
+        # Big-RAM machine (e.g. a 24GB Mac): load straight to CPU — simplest + fastest.
+        # Memory-tight CUDA GPU (T4): spread across GPU + CPU + disk.
+        device_map="auto" if use_cuda else None,
+        offload_folder="offload" if use_cuda else None,
     )
     print(f"applying adapter from {args.adapter_dir} and merging...")
-    model = PeftModel.from_pretrained(base, args.adapter_dir, offload_folder="offload")
-    model = model.merge_and_unload()          # fold LoRA weights into the base (handles offload)
+    peft_kwargs = {"offload_folder": "offload"} if use_cuda else {}
+    model = PeftModel.from_pretrained(base, args.adapter_dir, **peft_kwargs)
+    model = model.merge_and_unload()          # fold LoRA weights into the base
 
     model.save_pretrained(args.out, safe_serialization=True)
     AutoTokenizer.from_pretrained(c.BASE_MODEL).save_pretrained(args.out)

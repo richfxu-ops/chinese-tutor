@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Finish on the Mac — merge, quantize, run</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .step { display:flex; gap:1rem; margin:1.4rem 0; }
+  .step .n { flex:none; width:2rem; height:2rem; display:grid; place-items:center; border-radius:50%; background:var(--ink); color:var(--ground); font-family:var(--mono); font-weight:600; font-size:.9rem; }
+  .step .body { flex:1; }
+  .step .body h3 { margin:.15rem 0 .5rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="crumb"><a href="index.html">← docs</a></p>
+  <p class="eyebrow">Ship · finish locally</p>
+  <h1>Finish on the Mac</h1>
+  <p class="lead">The T4 is too memory-cramped to merge a 7B in fp16. Your Mac (24GB) does it easily — and the merge + quantize steps need no GPU and none of the training libraries. Here's the whole local finish.</p>
+
+  <div class="callout jade"><strong>Why this works:</strong> merging = fp16 weight math (fits in 24GB RAM), and quantizing = a file conversion (llama.cpp). Neither needs CUDA or bitsandbytes. The only cost is a one-time ~15GB base-model download from Hugging Face.</div>
+
+  <div class="callout"><strong>Disk:</strong> you'll transiently use ~40–50GB (15GB base cache + 15GB merged + a 15GB f16 gguf + the 4.7GB final). Make sure you have the room; you can delete the intermediates after.</div>
+
+  <h2>Steps</h2>
+
+  <div class="step"><div class="n">1</div><div class="body">
+    <h3>Download the adapter from Colab</h3>
+    <p>In a Colab cell, zip and download the trained adapter (~100MB):</p>
+    <pre><code>import shutil
+from google.colab import files
+shutil.make_archive('hsk5_adapter', 'zip', 'outputs')
+files.download('hsk5_adapter.zip')</code></pre>
+  </div></div>
+
+  <div class="step"><div class="n">2</div><div class="body">
+    <h3>Unzip it into the project's <code>outputs/</code></h3>
+    <pre><code>cd ~/Documents/ml_projects/chinese_tutor
+mkdir -p outputs
+unzip ~/Downloads/hsk5_adapter.zip -d outputs</code></pre>
+    <p>You should see <code>outputs/adapter_config.json</code> and <code>outputs/adapter_model.safetensors</code>.</p>
+  </div></div>
+
+  <div class="step"><div class="n">3</div><div class="body">
+    <h3>Install the local deps</h3>
+    <pre><code># from the project folder, ideally in your .venv
+python3 -m pip install -r requirements.txt
+python3 -m pip install peft            # merge needs peft; it's not in the local reqs</code></pre>
+    <p>(<code>bitsandbytes</code> is <em>not</em> needed here — we load in fp16, not 4-bit.)</p>
+  </div></div>
+
+  <div class="step"><div class="n">4</div><div class="body">
+    <h3>Merge the adapter into the base</h3>
+    <pre><code>python3 merge.py</code></pre>
+    <p>The first run downloads Qwen2.5-7B from Hugging Face (~15GB, one-time, cached) and writes the merged model to <code>outputs/merged/</code>. On the Mac it loads straight into RAM — no GPU, no offload. Takes a few minutes after the download.</p>
+  </div></div>
+
+  <div class="step"><div class="n">5</div><div class="body">
+    <h3>Build llama.cpp (for the GGUF conversion)</h3>
+    <pre><code>git clone --depth 1 https://github.com/ggerganov/llama.cpp
+cmake -B llama.cpp/build -S llama.cpp
+cmake --build llama.cpp/build --config Release -j
+python3 -m pip install gguf sentencepiece protobuf</code></pre>
+    <p>~5 minutes; it builds with Metal support automatically on Apple Silicon.</p>
+  </div></div>
+
+  <div class="step"><div class="n">6</div><div class="body">
+    <h3>Convert + quantize to the served GGUF</h3>
+    <pre><code>python3 llama.cpp/convert_hf_to_gguf.py outputs/merged \
+    --outfile outputs/hsk5-tutor-f16.gguf --outtype f16
+
+./llama.cpp/build/bin/llama-quantize \
+    outputs/hsk5-tutor-f16.gguf outputs/hsk5-tutor-q4_k_m.gguf Q4_K_M</code></pre>
+    <p>Result: <code>outputs/hsk5-tutor-q4_k_m.gguf</code> (~4.7GB) — the file <code>app.py</code> loads. You can now delete <code>outputs/merged/</code> and the f16 gguf to reclaim disk.</p>
+  </div></div>
+
+  <div class="step"><div class="n">7</div><div class="body">
+    <h3>Run the demo 🎉</h3>
+    <pre><code>python3 get_cedict.py     # once — hover glosses
+python3 app.py            # http://localhost:7860</code></pre>
+    <p>That's the finish line — your fine-tuned tutor, running locally with the pinyin + hover reading layer.</p>
+  </div></div>
+
+  <div class="callout seal"><strong>If <code>merge.py</code> is slow or you hit a snag,</strong> paste it to me — but on a 24GB Mac loading 14GB of fp16 weights is comfortable, so it should be smooth. The download is the only real wait.</div>
+
+  <div class="foot">chinese_tutor · reference doc · finish on the Mac</div>
+</div>
+</body>
+</html>
