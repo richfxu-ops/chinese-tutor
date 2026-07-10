@@ -22,6 +22,9 @@ GRAMMAR_FILE = ROOT / "hsk5_grammar.txt"
 TRAIN_FILE = DATA_DIR / "train.jsonl"
 EVAL_FILE = DATA_DIR / "eval.jsonl"
 
+MERGED_DIR = OUTPUT_DIR / "merged"                       # fp16 base+adapter (merge.py)
+GGUF_FILE = OUTPUT_DIR / "hsk5-tutor-q4_k_m.gguf"        # quantized model app.py serves
+
 # --------------------------------------------------------------------------- #
 # Models
 # --------------------------------------------------------------------------- #

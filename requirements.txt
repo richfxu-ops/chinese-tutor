@@ -5,6 +5,9 @@ transformers>=4.46
 torch>=2.4
 accelerate>=1.0
 gradio>=4.44
+# Local serving of the quantized 7B (ships Metal wheels for Apple Silicon)
+llama-cpp-python>=0.3.0
 # Reading layer (app-side pinyin + hover gloss)
 pypinyin>=0.53
 jieba>=0.42
+certifi>=2024.0        # get_cedict.py TLS on python.org macOS builds

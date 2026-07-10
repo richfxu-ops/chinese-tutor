@@ -4,17 +4,14 @@
 > columns are `## ` headings; tasks are `- [ ]` / `- [x]`; optional `(P0)`–`(P3)` priority and `#tags`.
 
 ## Backlog
-- [ ] (P1) annotate.py — reading layer: pypinyin ruby + jieba/CC-CEDICT hover gloss → HTML #ship #M3
-- [ ] (P2) Bundle CC-CEDICT + README attribution (CC-BY-SA) #ship #M3
-- [ ] (P2) Merge adapter into base 7B, then quantize for local serving (GGUF/llama.cpp or MLX) #ship #M3
-- [ ] (P1) app.py — Gradio chat (HTML render: ruby + title) over quantized 7B #ship #M3
-- [ ] (P2) README with before/after examples #ship #M3
-- [ ] (P3) Optional: deploy to HF Spaces #ship #M3
-- [ ] (P3) Decide: keep 1.5B or bump to 3B (after M2 eval) #train
+- [ ] (P3) ~~Optional: deploy to HF Spaces~~ — not feasible for a 7B on free Spaces; local demo only #ship #M3
 - [ ] (P3) v2 roadmap: text-to-speech + voice chat (ASR) #roadmap
 
 ## Next
-- [ ] (P1) Smoke-test + full run of gen_data.py (needs ANTHROPIC_API_KEY) #data #M1
+- [ ] (P1) RUN: gen_data.py (needs ANTHROPIC_API_KEY) → data/*.jsonl #data #run
+- [ ] (P1) RUN: train_colab.ipynb on Colab → adapter → eval → merge → GGUF #train #run
+- [ ] (P1) RUN: python app.py locally + verify the demo end-to-end #ship #run
+- [ ] (P2) Fill README before/after from outputs/eval_report.md #ship #M3
 
 ## In Progress
 
@@ -31,3 +28,9 @@
 - [x] train.py — QLoRA SFT (4-bit base + LoRA + TRL SFTTrainer), save adapter #train #M2
 - [x] train_colab.ipynb — GPU notebook wrapper (upload → train → download adapter) #train #M2
 - [x] eval.py — base vs tuned before/after + optional Claude-judge rubric #eval #M2
+- [x] annotate.py — reading layer: pypinyin ruby + jieba/CC-CEDICT hover gloss (tested) #ship #M3
+- [x] get_cedict.py — fetch CC-CEDICT (124k entries) + README attribution #ship #M3
+- [x] merge.py + notebook GGUF cells — adapter → fp16 → Q4_K_M #ship #M3
+- [x] app.py — Gradio chat over quantized 7B with the reading layer #ship #M3
+- [x] README with quickstart + before/after template #ship #M3
+- [x] Decision: base model = Qwen2.5-7B (resolved, not 1.5B/3B) #train

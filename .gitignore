@@ -15,5 +15,9 @@ data/
 outputs/
 *.jsonl
 
+# Data assets (fetched via get_cedict.py) and model files
+cedict_ts.u8
+*.gguf
+
 # OS
 .DS_Store
