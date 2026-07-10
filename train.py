@@ -21,6 +21,11 @@ that.
 from __future__ import annotations
 
 import argparse
+import os
+
+# Reduce CUDA fragmentation OOMs on small GPUs (e.g. T4). Must be set before torch
+# initializes CUDA, so it lives at the very top of the module.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import torch
 from datasets import load_dataset

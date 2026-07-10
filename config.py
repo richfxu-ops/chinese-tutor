@@ -180,11 +180,12 @@ class TrainConfig:
     max_seq_len: int = 1024
     epochs: int = 2            # enough for SFT on ~800 examples; keeps the T4 run shorter
     lr: float = 2e-4
-    # 7B in 4-bit: keep per-device batch small so it fits a 24GB Colab GPU
-    # (L4); grad accumulation keeps the effective batch at 16. train.py also
-    # enables gradient checkpointing. Bump the batch up on an A100 if you have one.
-    per_device_batch_size: int = 4
-    grad_accum_steps: int = 4          # effective batch 16
+    # Micro-batch of 2 fits a 16GB T4 — the loss logits for a 152k-vocab 7B are
+    # large on long-sequence batches, so batch 4 OOMs. Grad accumulation keeps the
+    # effective batch at 16 (same training dynamics). Bump per_device_batch up on a
+    # bigger GPU (A100/L4). train.py also enables gradient checkpointing.
+    per_device_batch_size: int = 2
+    grad_accum_steps: int = 8          # effective batch 16
     warmup_ratio: float = 0.03
     lr_scheduler: str = "cosine"
     logging_steps: int = 2     # log loss often so we can confirm it's learning quickly
