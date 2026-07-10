@@ -24,7 +24,7 @@ from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 import config as c
-from train import build_bnb_config  # reuse the exact 4-bit config train.py used
+from train import build_bnb_config, compute_dtype  # reuse train.py's 4-bit config + dtype choice
 
 RUBRIC_AXES = [
     "level_fit",      # answer stays at/below HSK-5, scaffolds rather than escalates
@@ -46,7 +46,7 @@ def build_model():
         tok.pad_token = tok.eos_token
     base = AutoModelForCausalLM.from_pretrained(
         c.BASE_MODEL, quantization_config=build_bnb_config(), device_map="auto",
-        torch_dtype=getattr(torch, c.TRAIN.bnb_4bit_compute_dtype),
+        torch_dtype=compute_dtype(),
     )
     model = PeftModel.from_pretrained(base, str(c.OUTPUT_DIR))  # tuned; disable_adapter() → base
     model.eval()

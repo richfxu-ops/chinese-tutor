@@ -35,6 +35,15 @@ import config as c
 RESPONSE_TEMPLATE = "<|im_start|>assistant\n"
 
 
+def compute_dtype():
+    """bf16 on GPUs that support it (Ampere+: A100/L4), fp16 otherwise (Turing: T4).
+    bf16 on a T4 falls back to slow emulation, so fp16 there is both correct and much
+    faster — this is picked at runtime so the same code is fast on any GPU."""
+    if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+        return torch.bfloat16
+    return torch.float16
+
+
 def build_bnb_config() -> BitsAndBytesConfig:
     """4-bit quantization for the frozen base (QLoRA)."""
     t = c.TRAIN
@@ -42,7 +51,7 @@ def build_bnb_config() -> BitsAndBytesConfig:
         load_in_4bit=t.load_in_4bit,
         bnb_4bit_quant_type=t.bnb_4bit_quant_type,
         bnb_4bit_use_double_quant=t.bnb_4bit_use_double_quant,
-        bnb_4bit_compute_dtype=getattr(torch, t.bnb_4bit_compute_dtype),
+        bnb_4bit_compute_dtype=compute_dtype(),
     )
 
 
@@ -86,11 +95,12 @@ def main() -> None:
         tokenizer.pad_token = tokenizer.eos_token  # Qwen has no pad token by default
 
     # --- 4-bit base ------------------------------------------------------- #
+    dtype = compute_dtype()
     model = AutoModelForCausalLM.from_pretrained(
         c.BASE_MODEL,
         quantization_config=build_bnb_config(),
         device_map="auto",
-        torch_dtype=getattr(torch, t.bnb_4bit_compute_dtype),
+        torch_dtype=dtype,
     )
     model.config.use_cache = False  # required with gradient checkpointing
 
@@ -107,7 +117,8 @@ def main() -> None:
         logging_steps=t.logging_steps,
         max_seq_length=t.max_seq_len,
         packing=False,                      # required: completion-only masking needs unpacked seqs
-        bf16=True,
+        bf16=(dtype == torch.bfloat16),     # bf16 on A100/L4, fp16 on T4 (see compute_dtype)
+        fp16=(dtype == torch.float16),
         optim="paged_adamw_8bit",           # memory-friendly optimizer for QLoRA
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},

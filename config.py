@@ -175,10 +175,10 @@ class TrainConfig:
     load_in_4bit: bool = True
     bnb_4bit_quant_type: str = "nf4"
     bnb_4bit_use_double_quant: bool = True
-    bnb_4bit_compute_dtype: str = "bfloat16"
+    # (compute dtype is picked at runtime in train.py: bf16 on A100/L4, fp16 on T4)
     # SFT
     max_seq_len: int = 1024
-    epochs: int = 3
+    epochs: int = 2            # enough for SFT on ~800 examples; keeps the T4 run shorter
     lr: float = 2e-4
     # 7B in 4-bit: keep per-device batch small so it fits a 24GB Colab GPU
     # (L4); grad accumulation keeps the effective batch at 16. train.py also
@@ -187,7 +187,7 @@ class TrainConfig:
     grad_accum_steps: int = 4          # effective batch 16
     warmup_ratio: float = 0.03
     lr_scheduler: str = "cosine"
-    logging_steps: int = 10
+    logging_steps: int = 2     # log loss often so we can confirm it's learning quickly
     seed: int = 42
 
 
