@@ -41,36 +41,63 @@ STARTERS = [
 ]
 
 
-def respond(user_msg: str, display: list[dict], raw: list[dict]):
-    """user_msg + raw history → model reply. Returns (annotated display, raw history, cleared box)."""
+# The transcript is rendered as raw HTML via gr.HTML — NOT gr.Chatbot. Gradio 6's
+# Chatbot markdown pass sanitizes messages and strips the `title` attribute (and
+# non-standard tags), which kills the hover gloss. gr.HTML renders our reading-layer
+# markup (ruby pinyin + title tooltips) untouched. Styles are inlined so they always
+# apply. We keep only the RAW history (for the model) and rebuild the display each turn.
+CHAT_CSS = """<style>
+.chat { display:flex; flex-direction:column; gap:.6rem; padding:.4rem; }
+.b { max-width:88%; border:1px solid #e4ded3; border-radius:12px; padding:.6rem .85rem; color:#211c19; }
+.b.u { align-self:flex-end; background:#f6e9e6; border-top-right-radius:3px; }
+.b.t { align-self:flex-start; background:#fbfaf7; border-top-left-radius:3px; }
+.b .who { font-family:ui-monospace,Menlo,monospace; font-size:.6rem; text-transform:uppercase; letter-spacing:.07em; margin-bottom:.35rem; }
+.b.u .who { color:#b3302a; text-align:right; }
+.b.t .who { color:#2f6e5d; }
+.b .msg { font-size:1.06rem; line-height:2.5; }
+ruby { ruby-position:over; margin:0 .02em; }
+rt { font-family:ui-monospace,Menlo,monospace; font-size:.45em; color:#b3302a; font-weight:500; }
+.hz { border-bottom:1px dotted #9a9086; cursor:help; border-radius:2px; }
+.hz:hover { background:#e7f0ec; }
+.empty { color:#9a9086; text-align:center; padding:2.5rem 1rem; }
+</style>"""
+
+
+def render_chat(raw: list[dict]) -> str:
+    """Build the whole transcript as one self-contained HTML block, annotating every
+    Chinese span (pinyin ruby + hover gloss)."""
+    bubbles = []
+    for m in raw:
+        u = m["role"] == "user"
+        who = "You" if u else "老师 Tutor"
+        bubbles.append(
+            f'<div class="b {"u" if u else "t"}"><div class="who">{who}</div>'
+            f'<div class="msg">{annotate(m["content"])}</div></div>'
+        )
+    inner = "".join(bubbles) or '<div class="empty">用中文或英文问我… (ask me anything)</div>'
+    return CHAT_CSS + f'<div class="chat">{inner}</div>'
+
+
+def respond(user_msg: str, raw: list[dict]):
+    """user message + raw history → model reply. Returns (chat HTML, raw history, cleared box)."""
+    if not user_msg.strip():
+        return render_chat(raw), raw, ""
     raw = raw + [{"role": "user", "content": user_msg}]
     messages = [{"role": "system", "content": c.SYSTEM_PROMPT}] + raw
     reply = llm.create_chat_completion(messages, temperature=0.7, max_tokens=512)["choices"][0]["message"]["content"]
     raw = raw + [{"role": "assistant", "content": reply}]
-    display = display + [
-        {"role": "user", "content": annotate(user_msg)},
-        {"role": "assistant", "content": annotate(reply)},
-    ]
-    return display, raw, ""
+    return render_chat(raw), raw, ""
 
-
-CSS = """
-rt { font-size: .5em; color: #b3302a; }
-.hz { border-bottom: 1px dotted #aaa; cursor: help; }
-.hz:hover { background: #e7f0ec; }
-"""
 
 with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
     gr.Markdown("# HSK-5 中文 Tutor\nBilingual answers · pinyin over every character · **hover a word for its meaning**.")
-    # Gradio 6: messages format is the default (no `type=`). sanitize_html=False +
-    # allow_tags lets the reading layer's <ruby>/<rt>/<span title> survive.
-    chatbot = gr.Chatbot(sanitize_html=False, render_markdown=True, height=460, label="对话")
+    chat_html = gr.HTML(render_chat([]))
     raw_state = gr.State([])
     msg = gr.Textbox(placeholder="用中文或英文问我… (ask in Chinese or English)", label="", submit_btn=True)
     gr.Examples(examples=STARTERS, inputs=msg, label="Try one of the six tasks")
 
-    msg.submit(respond, [msg, chatbot, raw_state], [chatbot, raw_state, msg])
-    gr.Button("清空 Clear").click(lambda: ([], [], ""), None, [chatbot, raw_state, msg])
+    msg.submit(respond, [msg, raw_state], [chat_html, raw_state, msg])
+    gr.Button("清空 Clear").click(lambda: (render_chat([]), [], ""), None, [chat_html, raw_state, msg])
 
 if __name__ == "__main__":
-    demo.launch(css=CSS)   # Gradio 6: css passes to launch(), not the Blocks constructor
+    demo.launch()
