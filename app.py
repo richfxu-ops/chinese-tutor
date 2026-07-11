@@ -217,10 +217,10 @@ footer {{ display:none !important; }}
        border-radius:3px; padding:.5rem .85rem; }}
 .b .who {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.58rem;
           text-transform:uppercase; letter-spacing:.16em; margin-bottom:.4rem; }}
-.b .who .spk {{ border:none; background:none; cursor:pointer; font-size:.8rem;
-               padding:0; margin-left:.5rem; opacity:.45; vertical-align:middle;
-               transition:opacity .15s; }}
-.b .who .spk:hover {{ opacity:1; }}
+.spk.line {{ border:none; background:none; cursor:pointer; font-size:.72rem;
+            padding:0 .15rem; margin-left:.35rem; opacity:.3; vertical-align:baseline;
+            transition:opacity .15s; }}
+.spk.line:hover {{ opacity:1; }}
 .b.t .who {{ color:var(--cinnabar); }}
 .b.u .who {{ color:var(--ink-soft); text-align:right; }}
 .b .msg {{ font-family:"EB Garamond",var(--hanzi-kai); font-size:1.17rem; line-height:2.55; }}
@@ -323,6 +323,13 @@ button[role="tab"][aria-selected="true"] {{
 .targets-row .tg {{ font-family:var(--hanzi-kai); color:var(--ink); }}
 
 /* ---------- mode toggle ---------- */
+#mode-row {{ align-items:center; gap:1rem; }}
+#review-mode {{ flex-grow:0 !important; }}
+#review-mode label {{ display:flex; align-items:center; gap:.4rem; cursor:pointer; }}
+#review-mode span {{ font-family:"IBM Plex Mono",ui-monospace,monospace !important;
+                    font-size:.68rem !important; letter-spacing:.1em;
+                    text-transform:uppercase; color:var(--ink-soft) !important; }}
+#review-mode input {{ accent-color:var(--cinnabar); }}
 #mode {{ margin:.15rem 0 .1rem; }}
 #mode label {{
   background:transparent !important; border:1px solid var(--hairline) !important;
@@ -609,11 +616,11 @@ APP_JS = """
     const ta = document.querySelector('#deck-words textarea');
     if (!ta) return;
     const now = Date.now();
-    const fronts = [...loadDeck()]
-      .filter(c => c.kind !== 'fix')   // correction fronts are sentences, not target words
-      .sort((a, b) => (a.due <= now ? 0 : 1) - (b.due <= now ? 0 : 1))
-      .map(c => c.front).slice(0, 30);
-    setNative(ta, JSON.stringify(fronts));
+    const words = loadDeck().filter(c => c.kind !== 'fix');  // fix fronts are sentences
+    setNative(ta, JSON.stringify({
+      due: words.filter(c => c.due <= now).map(c => c.front).slice(0, 30),
+      other: words.filter(c => c.due > now).map(c => c.front).slice(0, 30),
+    }));
   };
   window.addEventListener('storage', (e) => {
     if (e.key !== KEY) return;
@@ -1041,19 +1048,30 @@ def translate_user_to_chinese(user_msg: str) -> str:
         return ""
 
 
-def _render_msg(m: dict) -> str:
-    """A message's display HTML: annotated text, plus any filled-in translations
-    inserted under their lines. Fills go through the reading layer too — an
-    English fill passes through untouched, a Chinese one (the translation of
-    the student's English prompt) gets ruby + glosses + click-to-collect."""
-    ov, fills = m.get("tips"), m.get("fills")
-    if not fills:
-        return _tipped(m["content"], ov)
+def _spk(line: str) -> str:
+    """A small per-line TTS button voicing just that line's Chinese."""
+    return (f'<button class="spk line" title="朗读这一行 · read this line aloud"'
+            f' data-speak="{html.escape(chinese_only(line), quote=True)}">🔊</button>')
+
+
+def _render_msg(m: dict, tutor: bool) -> str:
+    """A message's display HTML: annotated text line by line, a 🔊 per Chinese
+    line (tutor lines, and Chinese fills anywhere), plus any filled-in
+    translations under their lines. Fills go through the reading layer too —
+    an English fill passes through untouched, a Chinese one (the translation
+    of the student's English prompt) gets ruby + glosses + click-to-collect."""
+    ov, fills = m.get("tips"), m.get("fills") or {}
     parts = []
     for i, line in enumerate(m["content"].split("\n")):
-        parts.append(_tipped(line, ov))
+        h = _tipped(line, ov)
+        if tutor and HAS_CJK.search(line):
+            h += _spk(line)
+        parts.append(h)
         if i in fills:
-            parts.append(f'<span class="fill">{_tipped(fills[i], ov)}</span>')
+            f = _tipped(fills[i], ov)
+            if HAS_CJK.search(fills[i]):
+                f += _spk(fills[i])
+            parts.append(f'<span class="fill">{f}</span>')
     return "<br>".join(parts)
 
 
@@ -1066,11 +1084,7 @@ def render_chat(raw: list[dict]) -> str:
     for i, m in enumerate(raw):
         u = m["role"] == "user"
         who = "You" if u else "老师 Tutor"
-        msg = _render_msg(m)
-        spk = "" if u else (
-            f'<button class="spk" title="朗读中文 · read the Chinese aloud"'
-            f' data-speak="{html.escape(chinese_only(m["content"]), quote=True)}">🔊</button>'
-        )
+        msg = _render_msg(m, tutor=not u)
         # When the tutor corrected the previous student turn, offer to save the
         # correction as a flashcard (front: the student's sentence, back: the
         # fix + rule). APP_JS handles the click; the data- attrs carry the card.
@@ -1086,7 +1100,7 @@ def render_chat(raw: list[dict]) -> str:
                     f'✚ 收藏纠错 · save correction</button>'
                 )
         bubbles.append(
-            f'<div class="b {"u" if u else "t"}"><div class="who">{who}{spk}</div>'
+            f'<div class="b {"u" if u else "t"}"><div class="who">{who}</div>'
             f'<div class="msg">{msg}</div>{chip}</div>'
         )
     inner = "".join(bubbles) or '<div class="empty">用中文或英文问我… (ask me anything)</div>'
@@ -1098,12 +1112,24 @@ def render_chat(raw: list[dict]) -> str:
 # a hidden textbox), padded to 5 with random HSK-5 seeds (HSK_VOCAB, loaded at
 # the top). Picked once per conversation and kept until 清空 so the tutor can
 # keep circling back to them.
-def pick_targets(deck_json: str) -> list[str]:
+def pick_targets(deck_json: str, review_only: bool = False) -> list[str]:
+    """Conversation target words. Normal mode: up to 3 deck words (due first)
+    padded to 5 with random HSK-5 seeds. Review mode: ONLY due cards — the
+    conversation becomes the SRS review session (falls back to normal when
+    nothing is due)."""
+    def clean(ws):
+        return [w for w in ws if isinstance(w, str) and w.strip()]
     try:
-        deck_words = [w for w in json.loads(deck_json or "[]") if isinstance(w, str) and w.strip()]
+        data = json.loads(deck_json or "{}")
     except (json.JSONDecodeError, TypeError):
-        deck_words = []
-    targets = deck_words[:3]
+        data = {}
+    if isinstance(data, list):                       # pre-split mirror shape
+        due, other = clean(data), []
+    else:
+        due, other = clean(data.get("due", [])), clean(data.get("other", []))
+    if review_only and due:
+        return due[:5]
+    targets = (due + other)[:3]
     pool = [w for w in HSK_VOCAB if w not in targets]
     targets += random.sample(pool, k=min(5 - len(targets), len(pool)))
     return targets
@@ -1123,7 +1149,7 @@ def strip_for_llm(raw: list[dict]) -> list[dict]:
 
 
 def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
-            targets: list[str] | None):
+            targets: list[str] | None, review_only: bool):
     """user message + raw history → model reply.
     Returns (chat HTML, raw history, cleared box, targets state, targets bar HTML)."""
     conversational = "聊天" in mode
@@ -1132,7 +1158,7 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
                 render_targets(targets if conversational else None))
     if conversational:
         if not targets:
-            targets = pick_targets(deck_json)
+            targets = pick_targets(deck_json, review_only)
         # shared with gen_data.py so training data and serving use the same prompt
         system = c.conversation_system(targets)
     else:
@@ -1234,10 +1260,15 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
         raw_state = gr.State([])
         targets_state = gr.State(None)
         targets_bar = gr.HTML("")
-        mode = gr.Radio(
-            ["问答 · Q&A", "聊天 · conversation"], value="问答 · Q&A",
-            show_label=False, elem_id="mode", container=False,
-        )
+        with gr.Row(elem_id="mode-row"):
+            mode = gr.Radio(
+                ["问答 · Q&A", "聊天 · conversation"], value="问答 · Q&A",
+                show_label=False, elem_id="mode", container=False,
+            )
+            review_mode = gr.Checkbox(
+                False, label="复习模式 · target only due cards", elem_id="review-mode",
+                container=False,
+            )
         msg = gr.Textbox(
             placeholder="用中文或英文问我… (ask in Chinese or English)",
             show_label=False, submit_btn=True, elem_id="ask",
@@ -1257,7 +1288,7 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
         # sample from STARTER_POOL on every page load and wires the clicks.
         gr.HTML('<div class="starters-row" id="starters"></div>')
 
-        msg.submit(respond, [msg, raw_state, mode, deck_words, targets_state],
+        msg.submit(respond, [msg, raw_state, mode, deck_words, targets_state, review_mode],
                    [chat_html, raw_state, msg, targets_state, targets_bar])
         clear = gr.Button("清空 · clear", elem_id="clear-btn")
         clear.click(lambda: (render_chat([]), [], "", None, ""), None,
