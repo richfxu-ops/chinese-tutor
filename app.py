@@ -456,6 +456,7 @@ APP_JS = """
     toast('已收藏 “' + front + '” · added to your deck (' + deck.length + ')');
     renderWordlist();
     syncDeckWords();
+    pushDeckFile();
     requestExample(card);
   });
 
@@ -464,6 +465,35 @@ APP_JS = """
   const requestExample = (card) => {
     const ta = document.querySelector('#card-req textarea');
     if (ta) setNative(ta, JSON.stringify({ id: card.id, word: card.front, gloss: card.gloss || '' }));
+  };
+
+  // Mirror every deck change to the server's data/deck.json (debounced —
+  // a review session rates cards in quick bursts).
+  let pushT;
+  const pushDeckFile = () => {
+    clearTimeout(pushT);
+    pushT = setTimeout(() => {
+      const ta = document.querySelector('#deck-save textarea');
+      if (ta) setNative(ta, localStorage.getItem(KEY) || '[]');
+    }, 600);
+  };
+  // Restore: a browser with NO deck key at all (fresh browser / cleared site
+  // data) adopts the server file. An empty-but-present deck is respected —
+  // deleting your last card doesn't resurrect it on reload.
+  const ensureDeckRestore = () => {
+    const el = document.getElementById('deck-file');
+    if (!el || el.dataset.done) return;
+    el.dataset.done = '1';
+    if (localStorage.getItem(KEY) !== null) return;
+    const text = el.textContent.trim();
+    if (!text) return;
+    try {
+      if (Array.isArray(JSON.parse(text))) {
+        localStorage.setItem(KEY, text);
+        renderWordlist();
+        syncDeckWords();
+      }
+    } catch {}
   };
   let lastCardRes = '';
   const checkCardRes = () => {
@@ -491,6 +521,7 @@ APP_JS = """
     localStorage.setItem(KEY, JSON.stringify(deck));
     toast(got.join('和') + '写好了 · card filled in for “' + card.front + '”');
     renderWordlist();
+    pushDeckFile();
   };
 
   // Correction cards: the server tags correctable tutor bubbles with a
@@ -514,6 +545,7 @@ APP_JS = """
     chip.classList.add('saved');
     chip.textContent = '✓ 已收藏 · saved';
     renderWordlist();
+    pushDeckFile();
   });
 
   // ---- word-list tab: table of the collected deck, with per-row removal.
@@ -578,6 +610,7 @@ APP_JS = """
     card[td.dataset.field] = val;
     localStorage.setItem(KEY, JSON.stringify(deck));
     toast('已保存 · saved');
+    pushDeckFile();
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && e.target.closest('.wl-edit')) {
@@ -608,6 +641,7 @@ APP_JS = """
     toast('已移除 “' + (card ? card.front : '') + '” · removed');
     renderWordlist();
     syncDeckWords();
+    pushDeckFile();
   });
 
   // Mirror the deck's word fronts (due-first, capped) into the hidden #deck-words
@@ -626,6 +660,7 @@ APP_JS = """
     if (e.key !== KEY) return;
     renderWordlist();
     syncDeckWords();
+    pushDeckFile();
   });
   // The mirror's real guarantee: re-sync when the ask box gains focus — the
   // user focuses before typing, giving Gradio's (async) store update seconds
@@ -785,6 +820,7 @@ APP_JS = """
       ensureStarters();
       ensureWordlist();
       ensureDeckSync();
+      ensureDeckRestore();
       ensureMic();
       checkCardRes();
       const chat = document.querySelector('.chat');
@@ -795,6 +831,7 @@ APP_JS = """
     ensureStarters();
     ensureWordlist();
     ensureDeckSync();
+    ensureDeckRestore();
     ensureMic();
   };
   if (document.readyState === 'loading') {
@@ -1245,6 +1282,36 @@ def gen_card_example(req_json: str) -> str:
     return html.escape(json.dumps(resp, ensure_ascii=False))
 
 
+# File-backed deck: localStorage is per-browser and clearable, so every deck
+# change is mirrored to data/deck.json (git-ignored, lives with the repo). On
+# page load, a browser with NO deck at all restores from the file — switching
+# browsers or clearing site data no longer loses the cards.
+DECK_FILE = c.ROOT / "data" / "deck.json"
+
+
+def save_deck(deck_json: str) -> None:
+    try:
+        if not isinstance(json.loads(deck_json), list):
+            return
+    except (json.JSONDecodeError, TypeError):
+        return
+    DECK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = DECK_FILE.with_suffix(".json.tmp")
+    tmp.write_text(deck_json, encoding="utf-8")
+    tmp.replace(DECK_FILE)
+
+
+def deck_restore_html() -> str:
+    """Contents of the deck file, re-read on every page load (the component
+    value is this callable), so a fresh browser restores the latest deck."""
+    try:
+        if DECK_FILE.exists():
+            return f'<div id="deck-file">{html.escape(DECK_FILE.read_text(encoding="utf-8"))}</div>'
+    except OSError:
+        pass
+    return '<div id="deck-file"></div>'
+
+
 def flashcards_srcdoc() -> str:
     """Embed web/flashcards.html as an <iframe srcdoc>. srcdoc iframes are
     same-origin, so the widget shares the click-to-collect localStorage deck and
@@ -1284,6 +1351,12 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
                               show_label=False, container=False)
         card_res = gr.HTML("", elem_id="card-res", elem_classes=["hidden-input"])
         card_req.change(gen_card_example, card_req, card_res)
+        # File-backed deck: every deck change is pushed here (debounced) and
+        # written to data/deck.json; #deck-file carries the file back on load.
+        deck_save = gr.Textbox("", elem_id="deck-save", elem_classes=["hidden-input"],
+                               show_label=False, container=False)
+        deck_save.change(save_deck, deck_save, None)
+        gr.HTML(deck_restore_html, elem_classes=["hidden-input"])
         # Starter chips live in plain HTML; APP_JS fills them with a fresh random
         # sample from STARTER_POOL on every page load and wires the clicks.
         gr.HTML('<div class="starters-row" id="starters"></div>')
