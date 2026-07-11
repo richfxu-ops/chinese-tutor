@@ -225,8 +225,8 @@ footer {{ display:none !important; }}
 .b.u .who {{ color:var(--ink-soft); text-align:right; }}
 .b .msg {{ font-family:"EB Garamond",var(--hanzi-kai); font-size:1.17rem; line-height:2.55; }}
 .b .msg, .b .msg * {{ color:var(--ink) !important; }}
-/* .fill-en (filled-in translations) deliberately unstyled: they read exactly
-   like model-authored English — the class stays only as a structural hook */
+/* .fill (filled-in translations, either direction) deliberately unstyled:
+   they read exactly like model-authored text — the class is only a hook */
 ruby {{ ruby-position:over; margin:0 .02em; }}
 rt {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.42em; font-weight:500; }}
 .b .msg rt {{ color:var(--cinnabar) !important; }}
@@ -1005,9 +1005,30 @@ def fill_translations(reply: str) -> dict[int, str]:
         return {}
 
 
+def translate_user_to_chinese(user_msg: str) -> str:
+    """Natural HSK-5 Chinese for an English prompt — if the student is asking
+    in English, they probably don't know how to say it in Chinese yet, so the
+    transcript shows them (annotated, collectible) under their own bubble."""
+    prompt = (
+        "把下面这句话翻译成自然的中文（HSK5水平的说法）。"
+        "只返回中文翻译，不要拼音，不要解释。\n\n" + user_msg.strip()
+    )
+    try:
+        out = llm.create_chat_completion(
+            [{"role": "user", "content": prompt}], temperature=0, max_tokens=120,
+        )["choices"][0]["message"]["content"]
+        line = next((l.strip() for l in out.splitlines() if l.strip()), "")
+        line = _UNLABEL.sub("", line).strip().strip('"“”')
+        return line[:200] if HAS_CJK.search(line) else ""
+    except Exception:  # noqa: BLE001 — no translation is just the old behavior
+        return ""
+
+
 def _render_msg(m: dict) -> str:
     """A message's display HTML: annotated text, plus any filled-in translations
-    inserted (styled as .fill-en) under the lines that were missing them."""
+    inserted under their lines. Fills go through the reading layer too — an
+    English fill passes through untouched, a Chinese one (the translation of
+    the student's English prompt) gets ruby + glosses + click-to-collect."""
     ov, fills = m.get("tips"), m.get("fills")
     if not fills:
         return _tipped(m["content"], ov)
@@ -1015,7 +1036,7 @@ def _render_msg(m: dict) -> str:
     for i, line in enumerate(m["content"].split("\n")):
         parts.append(_tipped(line, ov))
         if i in fills:
-            parts.append(f'<span class="fill-en">{html.escape(fills[i])}</span>')
+            parts.append(f'<span class="fill">{_tipped(fills[i], ov)}</span>')
     return "<br>".join(parts)
 
 
@@ -1113,6 +1134,11 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
         fills = fill_translations(reply)
         if fills:
             raw[-1]["fills"] = fills
+    # an English prompt gets its Chinese under the student's own bubble
+    if _mostly_ascii(user_msg) and len(user_msg.strip()) >= 8:
+        zh = translate_user_to_chinese(user_msg)
+        if zh:
+            raw[-2]["fills"] = {user_msg.count("\n"): zh}
     return (render_chat(raw), raw, "", targets,
             render_targets(targets if conversational else None))
 

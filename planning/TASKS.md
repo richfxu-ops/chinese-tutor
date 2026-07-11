@@ -64,4 +64,5 @@
 - [x] Code review round 2: 问老师 deck-sync bypass closed + e.source auth on the message channel, trailing-English trim on examples, word-list translation editing, comment/dedup cleanups; overlap gate + pinyin-leak candidates empirically cleared against training data #quality
 - [x] Model fills missing definitions on collect: words CEDICT lacks (一只, 很累…) get a model-written gloss alongside the example via the card channel #ship
 - [x] Hover tooltips too: unglossed words get model-written definitions inside the existing per-turn disambiguation call (flat JSON: number=sense pick, string=definition) #ship
-- [x] Q&A translation fill: Chinese lines the model left untranslated get a local translate pass (one extra call only when gaps exist); fills render as italic .fill-en lines, stored on the message, never fed back to the model #ship
+- [x] Q&A translation fill: Chinese lines the model left untranslated get a local translate pass (one extra call only when gaps exist); fills stored on the message, never fed back to the model; styled identically to authored text #ship
+- [x] English prompts get their Chinese under the student's bubble — annotated (ruby + glosses + collectible), both modes #ship
