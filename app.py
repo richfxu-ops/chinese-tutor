@@ -111,7 +111,8 @@ def gen_starters() -> list[str]:
             f"1. 问“{words[0]}”是什么意思\n"
             f"2. 请老师用“{words[1]}”造句\n"
             f"3. 格式：“这个句子对吗？……”——句子由你编，含一个典型的学习者语法错误，用上“{words[2]}”\n"
-            "4. 问一个日常英文表达用中文怎么说，格式：“How do I say ‘…’ in Chinese?”（选一个不能直译的表达）\n"
+            "4. 问一个日常英文表达用中文怎么说，格式：“How do I say ‘…’ in Chinese?”"
+        "——引号里必须填英文表达（选一个不能直译的，绝对不能填中文）\n"
             f"5. 格式：“给我一段关于…的对话”，场景跟“{words[3]}”有关\n"
             f"6. 问“{grammar}”这个语法怎么用\n"
             "要求：口语化、简短（每个不超过25个字）。"
@@ -122,8 +123,16 @@ def gen_starters() -> list[str]:
         out = generate([{"role": "user", "content": prompt}],
                        temperature=0.8, max_tokens=600)
         arr = extract_json_array(out)
-        starters = [s.strip() for s in arr if isinstance(s, str) and s.strip()][:6]
+        starters = [s.strip() for s in arr if isinstance(s, str) and s.strip()]
+        # a "How do I say X in Chinese?" starter must not contain Chinese —
+        # the model occasionally fills the slot with a Chinese phrase, which
+        # is nonsense by construction
+        starters = [s for s in starters
+                    if not ("how do i say" in s.lower() and HAS_CJK.search(s))][:6]
         if len(starters) >= 4:
+            if len(starters) < 6:   # top up from the pool so the row stays full
+                starters += random.sample(
+                    [p for p in STARTER_POOL if p not in starters], 6 - len(starters))
             return starters
         raise ValueError(f"only {len(starters)} usable starters in: {out[:120]!r}")
     except Exception as e:  # noqa: BLE001 — starters are decoration, never block launch
