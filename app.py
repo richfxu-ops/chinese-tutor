@@ -462,14 +462,23 @@ APP_JS = """
     lastCardRes = text;
     let res;
     try { res = JSON.parse(text); } catch { return; }
-    if (!res.id || !res.example) return;
+    if (!res.id) return;
     const deck = loadDeck();
     const card = deck.find(c => c.id === res.id);
     if (!card) return;                     // removed before the model finished
-    card.example = res.example;
-    card.example_en = res.example_en || '';
+    let got = [];
+    if (res.example) {
+      card.example = res.example;
+      card.example_en = res.example_en || '';
+      got.push('例句');
+    }
+    if (res.gloss && !card.gloss) {        // model-written definition fills an empty slot only
+      card.gloss = res.gloss;
+      got.push('释义');
+    }
+    if (!got.length) return;
     localStorage.setItem(KEY, JSON.stringify(deck));
-    toast('例句写好了 · fresh example for “' + card.front + '”');
+    toast(got.join('和') + '写好了 · card filled in for “' + card.front + '”');
     renderWordlist();
   };
 
@@ -1025,38 +1034,55 @@ _TRAILING_EN = re.compile(r"[，,\s]*[A-Za-z][A-Za-z0-9 ,.'’!?;:-]{7,}[.!?]?\s
 
 
 def gen_card_example(req_json: str) -> str:
-    """Write a fresh HSK-5 example sentence for a just-collected flashcard.
+    """Write a fresh HSK-5 example sentence for a just-collected flashcard —
+    and, when the dictionary had no gloss for the word (CEDICT lacks many
+    jieba compounds like 一只/很累), a brief English definition too.
 
     Called through a hidden request textbox (APP_JS writes {id, word, gloss}
     on collect); the result lands in a hidden HTML div the page JS observes,
-    and replaces the card's scraped conversation snippet. Runs on the same
-    llm/queue as chat, so it simply waits its turn behind a generation."""
+    and fills the card. Runs on the same llm/queue as chat, so it simply
+    waits its turn behind a generation."""
     try:
         req = json.loads(req_json)
         card_id, word, gloss = req["id"], req["word"], req.get("gloss", "")
     except (json.JSONDecodeError, KeyError, TypeError):
         return ""
-    meaning = f"（意思：{gloss}）" if gloss else ""
-    prompt = (
-        f"用“{word}”{meaning}写一个HSK5水平的简单例句，能自然地体现这个词的意思。"
-        "第一行：例句（不要拼音）。第二行：这个例句的英文翻译。只返回这两行，不要解释。"
-    )
+    if gloss:
+        prompt = (
+            f"用“{word}”（意思：{gloss}）写一个HSK5水平的简单例句，能自然地体现这个词的意思。"
+            "第一行：例句（不要拼音）。第二行：这个例句的英文翻译。只返回这两行，不要解释。"
+        )
+    else:
+        prompt = (
+            f"“{word}”是一个中文词或词组。\n"
+            f"第一行：它的简短英文释义（词典格式，比如 to meet; to see each other）。\n"
+            f"第二行：用“{word}”写一个HSK5水平的简单例句（不要拼音）。\n"
+            "第三行：例句的英文翻译。只返回这三行，不要解释。"
+        )
     out = llm.create_chat_completion(
-        [{"role": "user", "content": prompt}], temperature=0.7, max_tokens=120,
+        [{"role": "user", "content": prompt}], temperature=0.7, max_tokens=160,
     )["choices"][0]["message"]["content"].strip()
     lines = [_UNLABEL.sub("", line).strip().strip('"“”')
              for line in out.splitlines() if line.strip()]
-    example = lines[0][:120] if lines else ""
-    trimmed = _TRAILING_EN.sub("", example).strip()
-    if trimmed and word in trimmed:          # keep the trim only if it leaves a valid example
-        example = trimmed
-    if not example or word not in example:   # empty or wandered off — keep the scraped example
+    # the example is the first Chinese line containing the word; the definition
+    # (only asked for when the dictionary had none) is an English line BEFORE
+    # it, the translation an English line AFTER it
+    ex_idx = next((i for i, l in enumerate(lines) if word in l and HAS_CJK.search(l)), None)
+    resp: dict[str, str] = {"id": card_id}
+    if ex_idx is not None:
+        example = lines[ex_idx][:120]
+        trimmed = _TRAILING_EN.sub("", example).strip()
+        if trimmed and word in trimmed:      # keep the trim only if it leaves a valid example
+            example = trimmed
+        resp["example"] = example
+        resp["example_en"] = next(
+            (l[:160] for l in lines[ex_idx + 1:] if _mostly_ascii(l)), "")
+    if not gloss:
+        head = lines[:ex_idx] if ex_idx is not None else lines
+        resp["gloss"] = next((l[:80] for l in head if _mostly_ascii(l)), "")
+    if len(resp) == 1:                       # nothing usable — keep the scraped card
         return ""
-    # the translation is the first mostly-English line after the example; kept
-    # as its own field so the 🔊 button's zh TTS never reads English aloud
-    example_en = next((l[:160] for l in lines[1:] if _mostly_ascii(l)), "")
-    return html.escape(json.dumps(
-        {"id": card_id, "example": example, "example_en": example_en}, ensure_ascii=False))
+    return html.escape(json.dumps(resp, ensure_ascii=False))
 
 
 def flashcards_srcdoc() -> str:
