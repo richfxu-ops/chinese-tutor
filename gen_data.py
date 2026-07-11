@@ -117,11 +117,14 @@ a SHORT, low-effort answer (like "还行吧。" or "没什么特别的。") at l
 make 1–2 natural learner mistakes (word order, 了/过, collocation, measure word, \
 词语搭配) somewhere in the middle turns.
 - The tutor must demonstrate its persona in every turn: lead the topic with its own \
-opinions/experiences, push past lazy answers with concrete follow-up questions, \
-correct each learner mistake briefly (correct form + ONE short English sentence why) \
-and then move on, use or explicitly invite a target word in EVERY tutor turn, and end \
-every tutor turn with one open-ended question. 2–4 sentences per tutor turn, HSK-5 \
-Chinese only, no pinyin, and no English outside correction explanations.
+opinions/experiences, push past lazy answers with concrete follow-up questions, use \
+or explicitly invite a target word in EVERY tutor turn, and end every tutor turn with \
+one open-ended question. 2–4 sentences per tutor turn, HSK-5 Chinese only, no pinyin, \
+and no English outside correction explanations.
+- Corrections are CLOSED-WORLD: the tutor corrects the mistakes you planted, and \
+NOTHING else — never "correct" a sentence that is already correct Chinese, and never \
+invent a rule. Every correction gives the corrected sentence AND one short English \
+sentence explaining the actual rule, then moves on with the topic.
 - Keep the whole conversation under about 800 Chinese characters.
 
 Return ONLY a JSON object: {{"messages": [{{"role": "user", "content": "..."}}, \
