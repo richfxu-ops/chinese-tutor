@@ -53,6 +53,9 @@ python app.py                    # serves the GGUF at http://localhost:7860
 
 Or double-click `start-tutor.command` (launches and opens the browser for you).
 
+`LAN=1 python app.py` also serves on your Wi-Fi (the printed URL) so a phone or
+iPad can be the touchscreen — nice for 写 stroke practice. Localhost-only by default.
+
 ## Before / after
 
 _Filled from `outputs/eval_report.md` after a training run._

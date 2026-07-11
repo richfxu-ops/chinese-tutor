@@ -1424,9 +1424,27 @@ if __name__ == "__main__":
     # served at /gradio_api/file=<path>. Everything stays local/offline.
     gr.set_static_paths(paths=[c.ROOT / "web" / "vendor", c.ROOT / "data" / "strokes"])
     # PORT is set by dev tooling when 7860 is taken; default stays 7860.
+    # LAN=1 binds to the local network so a phone/iPad on the same Wi-Fi can be
+    # the touchscreen (great for 写 stroke practice; the file-backed deck means
+    # a fresh device inherits your cards). Off by default — localhost only.
+    # Note: the mic needs a secure context, so voice input stays a Mac feature.
+    port = int(os.environ.get("PORT", "7860"))
+    lan = os.environ.get("LAN") == "1"
+    if lan:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))          # no packets sent — just picks the LAN interface
+            ip = s.getsockname()[0]
+        except OSError:
+            ip = "<your-mac-ip>"
+        finally:
+            s.close()
+        print(f"LAN mode: open http://{ip}:{port} on your phone/iPad (same Wi-Fi)", flush=True)
     # Gradio 6 takes theme/css/js at launch() (not Blocks()).
     demo.launch(
-        server_port=int(os.environ.get("PORT", "7860")),
+        server_name="0.0.0.0" if lan else None,
+        server_port=port,
         theme=THEME,
         css=PAGE_CSS,
         head=HEAD_HTML,
