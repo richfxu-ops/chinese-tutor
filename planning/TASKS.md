@@ -66,3 +66,4 @@
 - [x] Hover tooltips too: unglossed words get model-written definitions inside the existing per-turn disambiguation call (flat JSON: number=sense pick, string=definition) #ship
 - [x] Q&A translation fill: Chinese lines the model left untranslated get a local translate pass (one extra call only when gaps exist); fills stored on the message, never fed back to the model; styled identically to authored text #ship
 - [x] English prompts get their Chinese under the student's bubble — annotated (ruby + glosses + collectible), both modes #ship
+- [x] Word list → click a word to open its card (back view) in the flashcards tab; parent→iframe show-card message, retried for lazy tab mounts #ship

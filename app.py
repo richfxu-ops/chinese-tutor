@@ -359,6 +359,8 @@ button[role="tab"][aria-selected="true"] {{
 .wl-table td.ex {{ color:var(--ink-soft); font-size:.9rem; }}
 .wl-table td.st {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.75rem;
                   color:var(--ink-soft); white-space:nowrap; }}
+.wl-open {{ cursor:pointer; }}
+.wl-open:hover {{ color:var(--cinnabar); }}
 .wl-edit {{ cursor:text; min-height:1.1em; }}
 .wl-edit:hover {{ outline:1px dotted var(--hairline); outline-offset:-1px; }}
 .wl-edit:focus {{ outline:2px solid var(--cinnabar); outline-offset:-2px;
@@ -533,12 +535,14 @@ APP_JS = """
     const edit = (c, field, cls, val) =>
       '<td' + editable(c, field, cls) + '>' + escHtml(val || '') + '</td>';
     const rows = [...deck].reverse().map(c => {
+      const open = ' class="wl-open" data-fid="' + escHtml(c.id)
+        + '" title="打开卡片 · open this card"';
       const cells = c.kind === 'fix'
-        ? '<td class="hanzi sent">' + escHtml(c.front) + '</td>'
+        ? '<td class="hanzi sent"><span' + open + '>' + escHtml(c.front) + '</span></td>'
           + '<td class="py">改错</td>'
           + edit(c, 'fix', 'fixto', c.fix)
           + edit(c, 'why', 'ex', c.why)
-        : '<td class="hanzi">' + escHtml(c.front) + '</td>'
+        : '<td class="hanzi"><span' + open + '>' + escHtml(c.front) + '</span></td>'
           + '<td class="py">' + escHtml(c.pinyin || '') + '</td>'
           + edit(c, 'gloss', '', c.gloss)
           // example + its translation as two separately-editable blocks
@@ -573,6 +577,19 @@ APP_JS = """
       e.preventDefault();
       e.target.closest('.wl-edit').blur();
     }
+  });
+
+  // clicking a word in the list opens its card in the flashcards tab; the
+  // message is sent twice because a first-ever visit mounts the iframe lazily
+  document.addEventListener('click', (e) => {
+    const word = e.target.closest('.wl-open');
+    if (!word) return;
+    [...document.querySelectorAll('button[role="tab"]')]
+      .find(t => t.textContent.includes('卡片'))?.click();
+    const show = () => document.querySelector('.cards-frame')
+      ?.contentWindow?.postMessage({ type: 'show-card', id: word.dataset.fid }, '*');
+    setTimeout(show, 250);
+    setTimeout(show, 900);
   });
 
   document.addEventListener('click', (e) => {

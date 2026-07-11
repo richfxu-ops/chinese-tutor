@@ -389,6 +389,20 @@ window.addEventListener("storage", (e) => {
   else { revealed = false; render(); }
 });
 
+// The parent's word list opens a specific card here ({type:'show-card', id}):
+// jump straight to its back view. Rating it works normally; the next render()
+// returns to the due queue.
+window.addEventListener("message", (e) => {
+  if (e.source !== window.parent) return;
+  if (!e.data || e.data.type !== "show-card" || !e.data.id) return;
+  deck = load();                        // parent may have just edited a card
+  const card = deck.find(c => c.id === e.data.id);
+  if (!card) return;
+  current = card; revealed = true;
+  refreshStats();
+  document.getElementById("stage").innerHTML = backView(card);
+});
+
 renderAutoBtn();
 render();
 </script>
