@@ -57,3 +57,4 @@
 - [x] In-context sense disambiguation: one extra model call/turn picks the CEDICT sense per ambiguous word (地道 → dì dao authentic); overrides fix tooltip + ruby #ship
 - [x] Model-written flashcard examples (async via hidden req/res channel) + CJK-ratio fix for the scraped placeholder #ship
 - [x] Editable cards: click-to-edit gloss/example in the word list; ✎ edit form in the review widget #ship
+- [x] Model-written starter chips at startup (seeded random vocab/grammar, one per task type; static pool kept as loud fallback) #ship

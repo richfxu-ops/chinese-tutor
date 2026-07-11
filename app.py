@@ -37,9 +37,9 @@ if not c.GGUF_FILE.exists():
 # is read from the GGUF metadata (Qwen2.5 ships a ChatML-style template).
 llm = Llama(model_path=str(c.GGUF_FILE), n_ctx=4096, n_gpu_layers=-1, verbose=False)
 
-# Starter-prompt pool, ~4 per task type. The page shows a fresh random six on
-# every load (sampled client-side in APP_JS, so no server round-trip or reload
-# of the Blocks app is needed).
+# Fallback starter pool, ~4 per task type — used only when gen_starters()
+# below fails. Normally the starters are written by the model at startup,
+# seeded with random vocab/grammar so every launch gets a genuinely new set.
 STARTER_POOL = [
     # explain_word
     "“毕竟”是什么意思？",
@@ -72,6 +72,52 @@ STARTER_POOL = [
     "“越来越”和“越……越……”有什么不同？",
     "“连……都……”是什么意思？",
 ]
+
+
+def _load_seed(path) -> list[str]:
+    return [
+        line.strip() for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+
+
+HSK_VOCAB = _load_seed(c.VOCAB_FILE)
+HSK_GRAMMAR = _load_seed(c.GRAMMAR_FILE)
+
+
+def gen_starters() -> list[str]:
+    """Model-written starter chips, one per task type, seeded with random vocab
+    and grammar so every launch is a new set. Falls back to STARTER_POOL."""
+    words = random.sample(HSK_VOCAB, 4)
+    grammar = random.choice(HSK_GRAMMAR)
+    prompt = (
+        "为一个HSK5水平的学生写6个开场问题，模拟学生问中文老师时会说的话，每种一个。"
+        "每一条都必须是学生对老师的【请求或提问】，不能是回答或对话本身：\n"
+        f"1. 问“{words[0]}”是什么意思\n"
+        f"2. 请老师用“{words[1]}”造句\n"
+        f"3. 格式：“这个句子对吗？……”——句子由你编，含一个典型的学习者语法错误，用上“{words[2]}”\n"
+        "4. 问一个日常英文表达用中文怎么说，格式：“How do I say ‘…’ in Chinese?”（选一个不能直译的表达）\n"
+        f"5. 格式：“给我一段关于…的对话”，场景跟“{words[3]}”有关\n"
+        f"6. 问“{grammar}”这个语法怎么用\n"
+        "要求：口语化、简短（每个不超过25个字）。"
+        '只返回一个JSON数组，包含6个字符串，例如 ["…","…","…","…","…","…"]。不要解释。'
+    )
+    try:
+        out = llm.create_chat_completion(
+            [{"role": "user", "content": prompt}], temperature=0.8, max_tokens=400,
+        )["choices"][0]["message"]["content"]
+        arr = json.loads(re.search(r"\[.*\]", out, re.DOTALL).group(0))
+        starters = [s.strip() for s in arr if isinstance(s, str) and s.strip()][:6]
+        if len(starters) >= 4:
+            return starters
+        raise ValueError(f"only {len(starters)} usable starters in: {out[:120]!r}")
+    except Exception as e:  # noqa: BLE001 — starters are decoration, never block launch
+        print(f"starters: model generation failed ({e}); using the fallback pool", flush=True)
+    return random.sample(STARTER_POOL, 6)
+
+
+print("writing fresh starter prompts...", flush=True)
+STARTERS = gen_starters()
 
 
 # The transcript is rendered as raw HTML via gr.HTML — NOT gr.Chatbot. Gradio 6's
@@ -689,7 +735,7 @@ APP_JS = """
 })();
 """
 
-HEAD_HTML = f"<script>{APP_JS.replace('__STARTERS__', json.dumps(STARTER_POOL, ensure_ascii=False))}</script>"
+HEAD_HTML = f"<script>{APP_JS.replace('__STARTERS__', json.dumps(STARTERS, ensure_ascii=False))}</script>"
 
 HEADER_HTML = """
 <div class="hdr">
@@ -861,14 +907,9 @@ def render_chat(raw: list[dict], tips: list[dict] | None = None) -> str:
 
 # Target words for conversation mode: the student's own collected flashcard
 # words first (the deck lives client-side, so APP_JS mirrors the word list into
-# a hidden textbox), padded to 5 with random HSK-5 seeds. Picked once per
-# conversation and kept until 清空 so the tutor can keep circling back to them.
-HSK_VOCAB = [
-    line.strip() for line in c.VOCAB_FILE.read_text(encoding="utf-8").splitlines()
-    if line.strip() and not line.startswith("#")
-]
-
-
+# a hidden textbox), padded to 5 with random HSK-5 seeds (HSK_VOCAB, loaded at
+# the top). Picked once per conversation and kept until 清空 so the tutor can
+# keep circling back to them.
 def pick_targets(deck_json: str) -> list[str]:
     try:
         deck_words = [w for w in json.loads(deck_json or "[]") if isinstance(w, str) and w.strip()]
