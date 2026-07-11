@@ -118,10 +118,20 @@ footer {{ display:none !important; }}
 
 /* ---------- transcript: a manuscript sheet ---------- */
 .chat {{
-  display:flex; flex-direction:column; gap:1.1rem; padding:1.2rem 1.3rem; min-height:320px;
+  display:flex; flex-direction:column; gap:1.1rem; padding:1.2rem 1.3rem 3.5rem; min-height:320px;
   background:var(--sheet); border:1px solid var(--hairline); border-radius:4px;
   box-shadow:0 1px 3px rgba(60,48,30,.08), 0 14px 34px -22px rgba(60,48,30,.35);
+  /* the sheet scrolls instead of growing unbounded; the extra bottom padding
+     leaves room for the hover tooltip on the last line */
+  max-height:min(64vh, 680px); overflow-y:auto;
+  scrollbar-width:thin; scrollbar-color:var(--hairline) transparent;
 }}
+.chat::-webkit-scrollbar {{ width:10px; }}
+.chat::-webkit-scrollbar-track {{ background:transparent; }}
+.chat::-webkit-scrollbar-thumb {{
+  background:var(--hairline); border-radius:5px; border:2px solid var(--sheet);
+}}
+.chat::-webkit-scrollbar-thumb:hover {{ background:#c4b391; }}
 @keyframes rise {{ from {{ opacity:0; transform:translateY(7px); }} }}
 .b {{ max-width:84%; animation:rise .3s ease both; }}
 .b.t {{ align-self:flex-start; border-left:2px solid var(--cinnabar); padding:.15rem 0 .15rem 1rem; }}
@@ -253,6 +263,36 @@ APP_JS = """
     localStorage.setItem(KEY, JSON.stringify(deck));
     toast('已收藏 “' + front + '” · added to your deck (' + deck.length + ')');
   });
+
+  // The transcript is capped (overflow-y): jump to the newest message when one
+  // arrives. Three traps, all hit in testing:
+  //  - Gradio 6 patches the .chat node IN PLACE on update (it is not replaced),
+  //    so new messages are detected by bubble count — which also means user
+  //    scroll position survives everything except a new message, as it should;
+  //  - this script runs in <head>, where document.body is still null — the
+  //    observer must be installed after DOM ready or observe() throws;
+  //  - the jump must repeat as layout settles: mutations fire pre-layout, and
+  //    the web-font swap can grow scrollHeight again afterwards.
+  const installAutoscroll = () => {
+    let lastCount = -1;
+    const jumpToNewest = (chat) => {
+      const jump = () => { chat.scrollTop = chat.scrollHeight; };
+      requestAnimationFrame(jump);
+      setTimeout(jump, 120);
+      setTimeout(jump, 500);
+    };
+    new MutationObserver(() => {
+      const chat = document.querySelector('.chat');
+      if (!chat || chat.childElementCount === lastCount) return;
+      lastCount = chat.childElementCount;
+      jumpToNewest(chat);
+    }).observe(document.body, { childList: true, subtree: true });
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', installAutoscroll);
+  } else {
+    installAutoscroll();
+  }
 })();
 """
 
