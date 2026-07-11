@@ -24,7 +24,7 @@ import gradio as gr
 from llama_cpp import Llama
 
 import config as c
-from annotate import HAS_CJK, ambiguous_words, annotate, sense_options
+from annotate import HAS_CJK, ambiguous_words, annotate, sense_options, unglossed_words
 from gen_data import extract_json_array, extract_json_object, load_seed
 
 if not c.GGUF_FILE.exists():
@@ -896,37 +896,55 @@ def _sentence_around(text: str, word: str) -> str:
 
 
 def disambiguate(texts: list[str]) -> dict[str, tuple[list[str], str]]:
-    """One model call → {word: (syllables, gloss)} for the ambiguous words in
-    `texts`, choosing the sense each word carries in its own sentence."""
-    words: dict[str, tuple[str, list[dict]]] = {}   # word -> (sentence, options)
+    """One model call → tooltip overrides {word: (syllables, gloss)} for the
+    new messages: sense PICKS for ambiguous words (地道: option number) and
+    written DEFINITIONS for words the dictionary lacks entirely (一只). One
+    flat JSON does both — a number means a pick, a string means a definition."""
+    sense: dict[str, tuple[str, list[dict]]] = {}   # word -> (sentence, options)
+    defs: dict[str, str] = {}                       # word -> sentence
     for text in texts:
         for w in ambiguous_words(text):
-            if w not in words and len(words) < 6:
-                words[w] = (_sentence_around(text, w), sense_options(w))
-    if not words:
+            if w not in sense and len(sense) < 6:
+                sense[w] = (_sentence_around(text, w), sense_options(w))
+        for w in unglossed_words(text):
+            if w not in defs and len(defs) < 4:
+                defs[w] = _sentence_around(text, w)
+    if not sense and not defs:
         return {}
     blocks = []
-    for w, (sentence, opts) in words.items():
+    for w, (sentence, opts) in sense.items():
         lines = "\n".join(f"{i + 1}. {o['reading']} — {o['brief']}" for i, o in enumerate(opts))
         blocks.append(f"词：{w}\n句子：{sentence}\n{lines}")
+    if defs:
+        blocks.append(
+            "下面的词没有选项——给每个词写一个简短的英文释义（词典格式，"
+            "比如 to meet; to see each other）：\n"
+            + "\n".join(f"词：{w}（句子：{s}）" for w, s in defs.items())
+        )
+    ex_pick = f'"{next(iter(sense))}": 1' if sense else ""
+    ex_def = f'"{next(iter(defs))}": "a short English definition"' if defs else ""
+    example = ", ".join(x for x in (ex_pick, ex_def) if x)
     prompt = (
-        "你是词典助手。判断每个词在它的句子里用的是哪个意思，选出选项编号。\n\n"
+        "你是词典助手。有选项的词：判断它在句子里用的是哪个意思，返回选项编号。"
+        "没有选项的词：直接写英文释义。\n\n"
         + "\n\n".join(blocks)
-        + "\n\n只返回一个JSON对象，例如 {\""
-        + next(iter(words)) + "\": 1}。不要解释。"
+        + "\n\n只返回一个JSON对象，例如 {" + example + "}。不要解释。"
     )
     try:
         out = llm.create_chat_completion(
-            [{"role": "user", "content": prompt}], temperature=0, max_tokens=160,
+            [{"role": "user", "content": prompt}], temperature=0, max_tokens=220,
         )["choices"][0]["message"]["content"]
         picks = extract_json_object(out)
         overrides = {}
-        for w, pick in picks.items():
-            if w in words and isinstance(pick, (int, str)) and str(pick).isdigit():
-                opts = words[w][1]
-                i = int(pick) - 1
+        for w, v in picks.items():
+            if w in sense and isinstance(v, (int, str)) and str(v).isdigit():
+                opts = sense[w][1]
+                i = int(v) - 1
                 if 0 <= i < len(opts):
                     overrides[w] = (opts[i]["syllables"], opts[i]["gloss"])
+            elif w in defs and isinstance(v, str) and v.strip() and _mostly_ascii(v):
+                # empty syllables keep the pypinyin ruby; only the gloss changes
+                overrides[w] = ([], v.strip()[:80])
         return overrides
     except Exception:  # noqa: BLE001 — a failed pick just keeps dictionary tips
         return {}

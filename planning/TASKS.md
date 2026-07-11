@@ -63,3 +63,4 @@
 - [x] 问老师 button on card backs → auto-asks in the chat tab (word: re-explain; 改错: why) #ship
 - [x] Code review round 2: 问老师 deck-sync bypass closed + e.source auth on the message channel, trailing-English trim on examples, word-list translation editing, comment/dedup cleanups; overlap gate + pinyin-leak candidates empirically cleared against training data #quality
 - [x] Model fills missing definitions on collect: words CEDICT lacks (一只, 很累…) get a model-written gloss alongside the example via the card channel #ship
+- [x] Hover tooltips too: unglossed words get model-written definitions inside the existing per-turn disambiguation call (flat JSON: number=sense pick, string=definition) #ship

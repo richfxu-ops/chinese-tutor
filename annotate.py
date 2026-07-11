@@ -168,6 +168,19 @@ def ambiguous_words(text: str) -> list[str]:
     return out
 
 
+def unglossed_words(text: str) -> list[str]:
+    """Annotation tokens of `text` with NO CEDICT entry at all (jieba compounds
+    like 一只/很累) — their tooltips would be pinyin-only, so the per-turn model
+    call writes them a definition."""
+    cedict = load_cedict()
+    out: list[str] = []
+    for m in _CJK_RUN.finditer(text):
+        for token in jieba.cut(m.group()):
+            if token not in out and HAS_CJK.search(token) and token not in cedict:
+                out.append(token)
+    return out
+
+
 def sense_options(word: str) -> list[dict]:
     """One dict per candidate sense of `word`, for the disambiguation prompt and
     for building the override once the model picks: {reading, syllables, brief, gloss}."""
