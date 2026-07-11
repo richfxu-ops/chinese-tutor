@@ -54,3 +54,6 @@
 - [x] Verified v2 weights live: drives conversation, pushes past lazy answers, corrects planted 见面她 error, weaves target words; Q&A bilingual format intact #train
 - [x] Correction flashcards: tutor corrections get a save chip → kind:'fix' cards (wrong sentence → fix + rule) in the deck, review widget, word list, Anki export #ship
 - [x] Voice input: Web Speech API mic button (zh-CN, interim streaming, no auto-submit); feature-detected, graceful permission errors — needs a real-mic check in Chrome #ship
+- [x] In-context sense disambiguation: one extra model call/turn picks the CEDICT sense per ambiguous word (地道 → dì dao authentic); overrides fix tooltip + ruby #ship
+- [x] Model-written flashcard examples (async via hidden req/res channel) + CJK-ratio fix for the scraped placeholder #ship
+- [x] Editable cards: click-to-edit gloss/example in the word list; ✎ edit form in the review widget #ship

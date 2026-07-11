@@ -309,6 +309,10 @@ button[role="tab"][aria-selected="true"] {{
 .wl-table td.ex {{ color:var(--ink-soft); font-size:.9rem; }}
 .wl-table td.st {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.75rem;
                   color:var(--ink-soft); white-space:nowrap; }}
+.wl-edit {{ cursor:text; }}
+.wl-edit:hover {{ outline:1px dotted var(--hairline); outline-offset:-1px; }}
+.wl-edit:focus {{ outline:2px solid var(--cinnabar); outline-offset:-2px;
+                 background:var(--sheet); }}
 .wl-remove {{ border:none; background:none; color:var(--ink-soft); cursor:pointer;
              font-size:.95rem; padding:.1rem .3rem; transition:color .15s; }}
 .wl-remove:hover {{ color:var(--cinnabar); }}
@@ -367,18 +371,51 @@ APP_JS = """
     if (deck.some(c => c.front === front)) { toast('“' + front + '” 已在卡片里 · already in your deck'); return; }
     const tip = hz.dataset.tip || '';
     const [pinyin, gloss = ''] = tip.split(/ — (.*)/s, 2);
-    // example: the sentence around the word, from the same bubble
+    // placeholder example: the sentence around the word, from the same bubble —
+    // must be mostly Chinese (a quoted word inside an English sentence used to
+    // slip through). Replaced by a model-written example via #card-req below.
     const msg = hz.closest('.msg');
     const sentence = msg
-      ? (plainText(msg).match(/[^。！？!?\\n]*[。！？!?]?/g) || []).find(s => s.includes(front)) : '';
-    deck.push({ id: front + ':' + Date.now(), front, pinyin, gloss,
-                example: (sentence || '').trim().slice(0, 120),
-                ease: 2.5, interval: 0, reps: 0, lapses: 0, due: 0 });
+      ? (plainText(msg).match(/[^。！？!?\\n]*[。！？!?]?/g) || []).find(s =>
+          s.includes(front) && (s.match(/[一-鿿]/g) || []).length / s.trim().length > 0.4)
+      : '';
+    const card = { id: front + ':' + Date.now(), front, pinyin, gloss,
+                   example: (sentence || '').trim().slice(0, 120),
+                   ease: 2.5, interval: 0, reps: 0, lapses: 0, due: 0 };
+    deck.push(card);
     localStorage.setItem(KEY, JSON.stringify(deck));
     toast('已收藏 “' + front + '” · added to your deck (' + deck.length + ')');
     renderWordlist();
     syncDeckWords();
+    requestExample(card);
   });
+
+  // Ask the server to write a fresh example sentence for a new card; the reply
+  // shows up in #card-res (watched by the observer below).
+  const requestExample = (card) => {
+    const ta = document.querySelector('#card-req textarea');
+    if (!ta) return;
+    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')
+      .set.call(ta, JSON.stringify({ id: card.id, word: card.front, gloss: card.gloss || '' }));
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  let lastCardRes = '';
+  const checkCardRes = () => {
+    const el = document.getElementById('card-res');
+    const text = el ? el.textContent.trim() : '';
+    if (!text || text === lastCardRes) return;
+    lastCardRes = text;
+    let res;
+    try { res = JSON.parse(text); } catch { return; }
+    if (!res.id || !res.example) return;
+    const deck = loadDeck();
+    const card = deck.find(c => c.id === res.id);
+    if (!card) return;                     // removed before the model finished
+    card.example = res.example;
+    localStorage.setItem(KEY, JSON.stringify(deck));
+    toast('例句写好了 · fresh example for “' + card.front + '”');
+    renderWordlist();
+  };
 
   // Correction cards: the server tags correctable tutor bubbles with a
   // .fix-collect chip; saving stores a kind:'fix' card (front = the student's
@@ -412,22 +449,30 @@ APP_JS = """
   const renderWordlist = () => {
     const el = document.getElementById('wordlist');
     if (!el) return;
+    // don't re-render out from under an in-progress edit
+    if (document.activeElement && document.activeElement.closest
+        && document.activeElement.closest('.wl-edit')) return;
     const deck = loadDeck();
     if (!deck.length) {
       el.innerHTML = '<div class="wl-empty">生词表是空的 — 在对话里点一个词就能收藏。<br>' +
         'Nothing collected yet — click any word in the chat to add it.</div>';
       return;
     }
+    // gloss/example (fix/why on correction cards) are editable in place
+    const edit = (c, field, cls, val) =>
+      '<td class="' + cls + ' wl-edit" contenteditable="true" spellcheck="false" '
+      + 'data-fid="' + escHtml(c.id) + '" data-field="' + field + '" '
+      + 'title="点击编辑 · click to edit">' + escHtml(val || '') + '</td>';
     const rows = [...deck].reverse().map(c => {
       const cells = c.kind === 'fix'
         ? '<td class="hanzi sent">' + escHtml(c.front) + '</td>'
           + '<td class="py">改错</td>'
-          + '<td class="fixto">' + escHtml(c.fix || '') + '</td>'
-          + '<td class="ex">' + escHtml(c.why || '') + '</td>'
+          + edit(c, 'fix', 'fixto', c.fix)
+          + edit(c, 'why', 'ex', c.why)
         : '<td class="hanzi">' + escHtml(c.front) + '</td>'
           + '<td class="py">' + escHtml(c.pinyin || '') + '</td>'
-          + '<td>' + escHtml(c.gloss || '') + '</td>'
-          + '<td class="ex">' + escHtml(c.example || '') + '</td>';
+          + edit(c, 'gloss', '', c.gloss)
+          + edit(c, 'example', 'ex', c.example);
       return '<tr>' + cells
         + '<td class="st">' + (c.reps > 0 ? c.reps + '×' : 'new') + '</td>'
         + '<td><button class="wl-remove" title="移除 · remove" data-fid="'
@@ -438,6 +483,26 @@ APP_JS = """
       + '<table class="wl-table"><thead><tr><th>词</th><th>拼音</th><th>释义</th>'
       + '<th>例句</th><th>复习</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
   };
+  // in-place edits: save on blur; Enter commits instead of inserting a newline
+  document.addEventListener('focusout', (e) => {
+    const td = e.target.closest('.wl-edit');
+    if (!td) return;
+    const deck = loadDeck();
+    const card = deck.find(c => c.id === td.dataset.fid);
+    if (!card) return;
+    const val = td.textContent.trim();
+    if ((card[td.dataset.field] || '') === val) return;
+    card[td.dataset.field] = val;
+    localStorage.setItem(KEY, JSON.stringify(deck));
+    toast('已保存 · saved');
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.closest('.wl-edit')) {
+      e.preventDefault();
+      e.target.closest('.wl-edit').blur();
+    }
+  });
+
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('.wl-remove');
     if (!btn) return;
@@ -605,6 +670,7 @@ APP_JS = """
       ensureWordlist();
       ensureDeckSync();
       ensureMic();
+      checkCardRes();
       const chat = document.querySelector('.chat');
       if (!chat || chat.childElementCount === lastCount) return;
       lastCount = chat.childElementCount;
@@ -852,6 +918,32 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
             render_targets(targets if conversational else None), tips)
 
 
+def gen_card_example(req_json: str) -> str:
+    """Write a fresh HSK-5 example sentence for a just-collected flashcard.
+
+    Called through a hidden request textbox (APP_JS writes {id, word, gloss}
+    on collect); the result lands in a hidden HTML div the page JS observes,
+    and replaces the card's scraped conversation snippet. Runs on the same
+    llm/queue as chat, so it simply waits its turn behind a generation."""
+    try:
+        req = json.loads(req_json)
+        word, gloss = req["word"], req.get("gloss", "")
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return ""
+    meaning = f"（意思：{gloss}）" if gloss else ""
+    prompt = (
+        f"用“{word}”{meaning}写一个HSK5水平的简单例句，能自然地体现这个词的意思。"
+        "只返回例句这一句话，不要拼音，不要翻译，不要解释。"
+    )
+    out = llm.create_chat_completion(
+        [{"role": "user", "content": prompt}], temperature=0.7, max_tokens=80,
+    )["choices"][0]["message"]["content"].strip().strip('"“”')
+    example = out.splitlines()[0].strip()[:120]
+    if word not in example:      # model wandered off — keep the scraped example
+        return ""
+    return html.escape(json.dumps({"id": req["id"], "example": example}, ensure_ascii=False))
+
+
 def flashcards_srcdoc() -> str:
     """Embed web/flashcards.html as an <iframe srcdoc>. srcdoc iframes are
     same-origin, so the widget shares the click-to-collect localStorage deck and
@@ -881,6 +973,12 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
         # it's how the student's own words reach pick_targets() on the server.
         deck_words = gr.Textbox("[]", elem_id="deck-words", elem_classes=["hidden-input"],
                                 show_label=False, container=False)
+        # Card-example channel: collect writes a request here; the model's fresh
+        # example sentence lands in #card-res, which APP_JS's observer picks up.
+        card_req = gr.Textbox("", elem_id="card-req", elem_classes=["hidden-input"],
+                              show_label=False, container=False)
+        card_res = gr.HTML("", elem_id="card-res", elem_classes=["hidden-input"])
+        card_req.change(gen_card_example, card_req, card_res)
         # Starter chips live in plain HTML; APP_JS fills them with a fresh random
         # sample from STARTER_POOL on every page load and wires the clicks.
         gr.HTML('<div class="starters-row" id="starters"></div>')

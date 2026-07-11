@@ -54,6 +54,9 @@
   .rate.hard{border-color:var(--gold);color:var(--gold)}
   .rate.good{border-color:var(--jade);color:var(--jade)}
   .rate.easy{border-color:var(--blue);color:var(--blue)}
+  .editbtn{border:none;background:none;cursor:pointer;font-size:1rem;color:var(--faint);padding:.1rem .3rem;vertical-align:middle;float:right}
+  .editbtn:hover{color:var(--seal);transform:none}
+  .editfield{font-family:var(--sans);font-size:.95rem;padding:.5rem .6rem;border:1px solid var(--line);border-radius:4px;background:var(--surface-2);color:var(--ink);width:100%}
   .spk{border:none;background:none;cursor:pointer;font-size:1.3rem;line-height:1;padding:.1rem .3rem;vertical-align:middle;opacity:.55}
   .spk:hover{opacity:1;transform:none}
   .spk.sm{font-size:.95rem}
@@ -216,9 +219,10 @@ function frontView(c){
     <button class="show-btn" onclick="reveal()">Show answer <span class="kbd">space</span></button>`;
 }
 function backView(c){
+  const editBtn = `<button class="editbtn" onclick="editCard()" title="编辑 · edit this card">✎</button>`;
   if (c.kind === "fix")
     return `<div class="card">
-        <div><span class="badge">改错 · fix it</span></div>
+        <div><span class="badge">改错 · fix it</span>${editBtn}</div>
         <div class="front sent">${esc(c.front)}</div>
         <div class="fixline">✓ ${esc(c.fix)} <button class="spk sm" onclick="speak(current.fix)" title="Play (p)">🔊</button></div>
         ${c.why ? `<div class="example">${esc(c.why)}</div>` : ``}
@@ -227,7 +231,7 @@ function backView(c){
         ${rateBtn("again","Again",c)}${rateBtn("hard","Hard",c)}${rateBtn("good","Good",c)}${rateBtn("easy","Easy",c)}
       </div>`;
   return `<div class="card">
-      <div class="front">${esc(c.front)} <button class="spk" onclick="speak(current.front)" title="Play (p)">🔊</button></div>
+      <div class="front">${esc(c.front)} <button class="spk" onclick="speak(current.front)" title="Play (p)">🔊</button>${editBtn}</div>
       <div class="pinyin">${esc(c.pinyin)}</div>
       <div class="gloss">${esc(c.gloss)}</div>
       ${c.example ? `<div class="example">${esc(c.example)} <button class="spk sm" onclick="speak(current.example)" title="Play sentence">🔊</button></div>` : ``}
@@ -235,6 +239,34 @@ function backView(c){
     <div class="btns">
       ${rateBtn("again","Again",c)}${rateBtn("hard","Hard",c)}${rateBtn("good","Good",c)}${rateBtn("easy","Easy",c)}
     </div>`;
+}
+
+// ---- edit-in-review: swap the card back for a small form -------------------
+function editCard(){
+  if(!current) return;
+  const stage = document.getElementById("stage");
+  const fields = current.kind === "fix"
+    ? [["fix","正确说法 (corrected sentence)"], ["why","解释 (why)"]]
+    : [["pinyin","pinyin"], ["gloss","meaning"], ["example","example sentence"]];
+  stage.innerHTML = `<div class="card" style="text-align:left">
+      <div class="front sent">${esc(current.front)}</div>
+      ${fields.map(([f, label]) =>
+        `<input id="e-${f}" class="editfield" placeholder="${esc(label)}" value="${esc(current[f] || "")}">`
+      ).join("")}
+      <div class="btns">
+        <button style="flex:1;background:var(--jade);color:#fff;border-color:var(--jade)" onclick="saveEdit()">保存 · save</button>
+        <button style="flex:1" onclick="render()">取消 · cancel</button>
+      </div>
+    </div>`;
+  document.querySelector(".editfield").focus();
+}
+function saveEdit(){
+  if(!current) return;
+  document.querySelectorAll(".editfield").forEach(inp => {
+    current[inp.id.slice(2)] = inp.value.trim();
+  });
+  save(); toast("已保存 · saved");
+  revealed = true; render();
 }
 function rateBtn(r, label, c){
   const key = {again:"1",hard:"2",good:"3",easy:"4"}[r];
