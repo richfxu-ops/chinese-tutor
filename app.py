@@ -235,6 +235,48 @@ button[role="tab"][aria-selected="true"] {{
 }}
 .cards-frame {{ width:100%; height:760px; border:none; display:block; }}
 
+/* ---------- mode toggle ---------- */
+#mode {{ margin:.15rem 0 .1rem; }}
+#mode label {{
+  background:transparent !important; border:1px solid var(--hairline) !important;
+  border-radius:2px !important; color:var(--ink-soft) !important;
+  font-family:"IBM Plex Mono",ui-monospace,monospace !important; font-size:.68rem !important;
+  letter-spacing:.1em; text-transform:uppercase; padding:.3rem .65rem !important;
+  box-shadow:none !important; cursor:pointer;
+}}
+#mode label.selected {{
+  color:var(--cinnabar) !important; border-color:var(--cinnabar) !important;
+  background:var(--sheet) !important;
+}}
+#mode input {{ display:none; }}
+
+/* ---------- word-list tab ---------- */
+.wl-head {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.68rem;
+           letter-spacing:.13em; text-transform:uppercase; color:var(--ink-soft);
+           margin:.4rem 0 .6rem; }}
+.wl-head b {{ color:var(--cinnabar); }}
+.wl-table {{ width:100%; border-collapse:collapse; background:var(--sheet);
+            border:1px solid var(--hairline);
+            box-shadow:0 1px 3px rgba(60,48,30,.08); }}
+.wl-table th {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.6rem;
+               letter-spacing:.12em; text-transform:uppercase; color:var(--ink-soft);
+               text-align:left; padding:.55rem .75rem; border-bottom:1px solid var(--hairline); }}
+.wl-table td {{ padding:.55rem .75rem; border-bottom:1px solid #ede4cd;
+               font-size:.98rem; color:var(--ink); vertical-align:top; }}
+.wl-table tr:last-child td {{ border-bottom:none; }}
+.wl-table td.hanzi {{ font-family:var(--hanzi-kai); font-size:1.2rem; white-space:nowrap; }}
+.wl-table td.py {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.82rem;
+                  color:var(--cinnabar); white-space:nowrap; }}
+.wl-table td.ex {{ color:var(--ink-soft); font-size:.9rem; }}
+.wl-table td.st {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.75rem;
+                  color:var(--ink-soft); white-space:nowrap; }}
+.wl-remove {{ border:none; background:none; color:var(--ink-soft); cursor:pointer;
+             font-size:.95rem; padding:.1rem .3rem; transition:color .15s; }}
+.wl-remove:hover {{ color:var(--cinnabar); }}
+.wl-empty {{ color:var(--ink-soft); text-align:center; padding:2.4rem 1rem;
+            font-family:var(--hanzi-kai); background:var(--sheet);
+            border:1px solid var(--hairline); border-radius:4px; line-height:2; }}
+
 /* ---------- collect toast ---------- */
 #collect-toast {{
   position:fixed; right:22px; bottom:22px; z-index:100;
@@ -295,7 +337,47 @@ APP_JS = """
                 ease: 2.5, interval: 0, reps: 0, lapses: 0, due: 0 });
     localStorage.setItem(KEY, JSON.stringify(deck));
     toast('已收藏 “' + front + '” · added to your deck (' + deck.length + ')');
+    renderWordlist();
   });
+
+  // ---- word-list tab: table of the collected deck, with per-row removal.
+  // Re-rendered whenever the deck changes: after a collect (above), after a
+  // removal (below), and on `storage` events from the flashcards iframe
+  // (ratings, manual adds, resets). Removals propagate back the same way.
+  const escHtml = (s) => String(s).replace(/[&<>"]/g,
+    (ch) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+  const renderWordlist = () => {
+    const el = document.getElementById('wordlist');
+    if (!el) return;
+    const deck = loadDeck();
+    if (!deck.length) {
+      el.innerHTML = '<div class="wl-empty">生词表是空的 — 在对话里点一个词就能收藏。<br>' +
+        'Nothing collected yet — click any word in the chat to add it.</div>';
+      return;
+    }
+    const rows = [...deck].reverse().map(c =>
+      '<tr><td class="hanzi">' + escHtml(c.front) + '</td>'
+      + '<td class="py">' + escHtml(c.pinyin || '') + '</td>'
+      + '<td>' + escHtml(c.gloss || '') + '</td>'
+      + '<td class="ex">' + escHtml(c.example || '') + '</td>'
+      + '<td class="st">' + (c.reps > 0 ? c.reps + '×' : 'new') + '</td>'
+      + '<td><button class="wl-remove" title="移除 · remove" data-fid="'
+      + escHtml(c.id) + '">✕</button></td></tr>').join('');
+    el.innerHTML =
+      '<div class="wl-head">生词表 · collected words <b>' + deck.length + '</b></div>'
+      + '<table class="wl-table"><thead><tr><th>词</th><th>拼音</th><th>释义</th>'
+      + '<th>例句</th><th>复习</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+  };
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.wl-remove');
+    if (!btn) return;
+    const deck = loadDeck();
+    const card = deck.find(c => c.id === btn.dataset.fid);
+    localStorage.setItem(KEY, JSON.stringify(deck.filter(c => c.id !== btn.dataset.fid)));
+    toast('已移除 “' + (card ? card.front : '') + '” · removed');
+    renderWordlist();
+  });
+  window.addEventListener('storage', (e) => { if (e.key === KEY) renderWordlist(); });
 
   // Browser TTS (same voice logic as web/flashcards.html): each tutor bubble
   // has a .spk button whose data-speak carries the Chinese-only text.
@@ -355,14 +437,25 @@ APP_JS = """
       setTimeout(jump, 120);
       setTimeout(jump, 500);
     };
+    // one-shot initial fill once Gradio mounts the container (guarded via
+    // data-filled so our own innerHTML writes don't re-trigger through the
+    // observer)
+    const ensureWordlist = () => {
+      const el = document.getElementById('wordlist');
+      if (!el || el.dataset.filled) return;
+      el.dataset.filled = '1';
+      renderWordlist();
+    };
     new MutationObserver(() => {
       ensureStarters();
+      ensureWordlist();
       const chat = document.querySelector('.chat');
       if (!chat || chat.childElementCount === lastCount) return;
       lastCount = chat.childElementCount;
       jumpToNewest(chat);
     }).observe(document.body, { childList: true, subtree: true });
     ensureStarters();
+    ensureWordlist();
   };
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', installObserver);
@@ -432,12 +525,13 @@ def render_chat(raw: list[dict]) -> str:
     return f'<div class="chat">{inner}</div>'
 
 
-def respond(user_msg: str, raw: list[dict]):
+def respond(user_msg: str, raw: list[dict], mode: str):
     """user message + raw history → model reply. Returns (chat HTML, raw history, cleared box)."""
     if not user_msg.strip():
         return render_chat(raw), raw, ""
+    system = c.CONVERSATION_PROMPT if "聊天" in mode else c.SYSTEM_PROMPT_APP
     raw = raw + [{"role": "user", "content": user_msg}]
-    messages = [{"role": "system", "content": c.SYSTEM_PROMPT_APP}] + raw
+    messages = [{"role": "system", "content": system}] + raw
     reply = llm.create_chat_completion(messages, temperature=0.7, max_tokens=512)["choices"][0]["message"]["content"]
     raw = raw + [{"role": "assistant", "content": reply}]
     return render_chat(raw), raw, ""
@@ -456,6 +550,10 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
     with gr.Tab("对话 · chat"):
         chat_html = gr.HTML(render_chat([]))
         raw_state = gr.State([])
+        mode = gr.Radio(
+            ["问答 · Q&A", "聊天 · conversation"], value="问答 · Q&A",
+            show_label=False, elem_id="mode", container=False,
+        )
         msg = gr.Textbox(
             placeholder="用中文或英文问我… (ask in Chinese or English)",
             show_label=False, submit_btn=True, elem_id="ask",
@@ -464,11 +562,15 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
         # sample from STARTER_POOL on every page load and wires the clicks.
         gr.HTML('<div class="starters-row" id="starters"></div>')
 
-        msg.submit(respond, [msg, raw_state], [chat_html, raw_state, msg])
+        msg.submit(respond, [msg, raw_state, mode], [chat_html, raw_state, msg])
         clear = gr.Button("清空 · clear", elem_id="clear-btn")
         clear.click(lambda: (render_chat([]), [], ""), None, [chat_html, raw_state, msg])
     with gr.Tab("卡片 · flashcards"):
         gr.HTML(flashcards_srcdoc())
+    with gr.Tab("词表 · word list"):
+        # Rendered entirely client-side by APP_JS from the localStorage deck
+        # (the deck never touches the server).
+        gr.HTML('<div id="wordlist"></div>')
 
 if __name__ == "__main__":
     # PORT is set by dev tooling when 7860 is taken; default stays 7860.

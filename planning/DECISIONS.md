@@ -2,6 +2,11 @@
 
 > Dated log of notable choices and *why*, so rationale isn't lost. Newest first.
 
+## 2026-07-10 — Conversation mode: a second serve-time system prompt, not a rule bolted onto Q&A
+- **Decision:** Added `CONVERSATION_PROMPT` (config.py) and a 问答/聊天 mode toggle in the chat tab. In 聊天 mode the tutor chats in short Chinese-forward turns, corrects the student's errors in passing (correct form + one-line English why), and must end each reply with a question. Full English translations are dropped in this mode — the reading layer (pinyin + hover gloss) carries comprehension.
+- **Why:** The "end with a question" rule appended to the Q&A prompt lost to the fine-tune (trained replies end with encouragement, not questions — the user hit this). Reframing the whole task in a separate system prompt works with the base model's instruction-following instead of fighting 810 single-turn examples; verified live: error caught + corrected, conversational tone, question ending.
+- **Implications:** Mode is a per-request input (history is shared across modes; switching mid-conversation just swaps the system prompt). Same train/serve caveat as SYSTEM_PROMPT_APP — app-side only, revisit if data is ever regenerated (a conversation-mode task type would be the real fix).
+
 ## 2026-07-10 — Vocab collection: client-side localStorage + iframe-srcdoc flashcards tab
 - **Decision:** Click-to-collect stores cards entirely client-side (localStorage, key `hsk5-tutor-deck-v1`, the schema web/flashcards.html already used). The flashcards widget is embedded as a Gradio tab via `<iframe srcdoc>` (same-origin → shared deck; `storage` events give live cross-tab sync). No server state, no static-file routes.
 - **Why:** The word's pinyin + gloss are already in the DOM (reading-layer attributes), so collection needs zero backend. srcdoc embedding reuses the existing verified widget as-is and it keeps working standalone. Caveat accepted: the deck lives per browser origin (host:port) — fine for a single-user local app on a stable port.

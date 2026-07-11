@@ -46,3 +46,5 @@
 - [x] Flashcards as in-app tab (iframe srcdoc, live storage sync, paper restyle) #ship #M3
 - [x] Chat transcript: scrollbar cap + auto-scroll to newest reply #ship #M3
 - [x] Chat polish: random starter chips per load, 🔊 browser TTS on replies, follow-up-question prompt rule #ship #M3
+- [x] Conversation mode: 聊天 toggle — Chinese-forward chat, corrects errors in passing, ends with a question #ship #M3
+- [x] 词表 word-list tab: table of collected cards + per-row removal, synced with flashcards #ship #M3
