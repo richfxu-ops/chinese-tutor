@@ -1134,20 +1134,21 @@ def fill_translations(reply: str) -> dict[int, str]:
         return {}
 
 
-def translate_user_to_chinese(user_msg: str) -> str:
-    """Natural HSK-5 Chinese for an English prompt — if the student is asking
-    in English, they probably don't know how to say it in Chinese yet, so the
-    transcript shows them (annotated, collectible) under their own bubble."""
+def translate_user_to_chinese(text: str, max_tokens: int = 120) -> str:
+    """Natural HSK-5 Chinese for English text — the student's prompt (shown
+    annotated under their bubble), or a fully-English reply the conversation
+    tutor should never have produced (converted before display/history)."""
     prompt = (
-        "把下面这句话翻译成自然的中文（HSK5水平的说法）。"
-        "只返回中文翻译，不要拼音，不要解释。\n\n" + user_msg.strip()
+        "把下面这段话翻译成自然的中文（HSK5水平的说法）。"
+        "只返回中文翻译，不要拼音，不要解释。\n\n" + text.strip()
     )
     try:
         out = generate([{"role": "user", "content": prompt}],
-                       temperature=0, max_tokens=120)
-        line = next((l.strip() for l in out.splitlines() if l.strip()), "")
-        line = _UNLABEL.sub("", line).strip().strip('"“”')
-        return line[:200] if HAS_CJK.search(line) else ""
+                       temperature=0, max_tokens=max_tokens)
+        lines = [_UNLABEL.sub("", l).strip().strip('"“”')
+                 for l in out.splitlines() if l.strip()]
+        zh = "\n".join(l for l in lines if HAS_CJK.search(l))
+        return zh[:400] if zh else ""
     except Exception:  # noqa: BLE001 — no translation is just the old behavior
         return ""
 
@@ -1266,7 +1267,10 @@ def enforce_chinese_reply(reply: str) -> str:
     line, or an English run glued to the end of a Chinese line) is stripped —
     from history too, so drift doesn't self-reinforce as fake context. A reply
     WITH a correction is left untouched: its English rule explanation is
-    legitimate and too entangled to edit safely."""
+    legitimate and too entangled to edit safely.
+
+    Returns "" when nothing Chinese survives (a fully-English reply) — the
+    caller then CONVERTS the reply instead of displaying English."""
     if _FIX_RE.search(reply):
         return reply
     kept = []
@@ -1277,8 +1281,7 @@ def enforce_chinese_reply(reply: str) -> str:
         if HAS_CJK.search(s):
             line = _TRAILING_EN.sub("", line.rstrip()) or line
         kept.append(line)
-    out = "\n".join(kept).strip()
-    return out or reply
+    return "\n".join(kept).strip()
 
 
 def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
@@ -1355,7 +1358,14 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
         yield (err, raw[:-1], user_msg, targets, bar())
         return
     if conversational:
-        reply = enforce_chinese_reply(reply)
+        cleaned = enforce_chinese_reply(reply)
+        if cleaned and HAS_CJK.search(cleaned):
+            reply = cleaned
+        else:
+            # the model went fully English — convert its reply to Chinese
+            # rather than let 聊天 mode speak English
+            yield (with_stream_bubble(reply, note="翻译中 translating"), raw, "", targets, bar())
+            reply = translate_user_to_chinese(reply, max_tokens=300) or reply
     raw = raw + [{"role": "assistant", "content": reply}]
 
     # reading-layer pass: sense picks, translation fills, prompt translation.
