@@ -25,3 +25,4 @@ cedict_ts.u8
 # Local build/merge artifacts (not committed)
 llama.cpp/
 offload/
+data_backup/
