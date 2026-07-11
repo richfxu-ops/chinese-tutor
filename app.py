@@ -17,6 +17,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import random
 import re
 
 import gradio as gr
@@ -235,6 +236,17 @@ button[role="tab"][aria-selected="true"] {{
 }}
 .cards-frame {{ width:100%; height:760px; border:none; display:block; }}
 
+/* ---------- conversation target words ---------- */
+.hidden-input {{ display:none !important; }}
+.targets-row {{
+  display:flex; flex-wrap:wrap; gap:.7rem; align-items:baseline;
+  margin:.55rem .1rem 0; font-size:1.08rem; line-height:2.1;
+}}
+.targets-label {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.6rem;
+                 letter-spacing:.13em; text-transform:uppercase; color:var(--ink-soft); }}
+.targets-row rt {{ color:var(--cinnabar); }}
+.targets-row .tg {{ font-family:var(--hanzi-kai); color:var(--ink); }}
+
 /* ---------- mode toggle ---------- */
 #mode {{ margin:.15rem 0 .1rem; }}
 #mode label {{
@@ -338,6 +350,7 @@ APP_JS = """
     localStorage.setItem(KEY, JSON.stringify(deck));
     toast('已收藏 “' + front + '” · added to your deck (' + deck.length + ')');
     renderWordlist();
+    syncDeckWords();
   });
 
   // ---- word-list tab: table of the collected deck, with per-row removal.
@@ -376,8 +389,27 @@ APP_JS = """
     localStorage.setItem(KEY, JSON.stringify(deck.filter(c => c.id !== btn.dataset.fid)));
     toast('已移除 “' + (card ? card.front : '') + '” · removed');
     renderWordlist();
+    syncDeckWords();
   });
-  window.addEventListener('storage', (e) => { if (e.key === KEY) renderWordlist(); });
+
+  // Mirror the deck's word fronts (due-first, capped) into the hidden #deck-words
+  // textbox so the server's pick_targets() can prefer the student's own words.
+  const syncDeckWords = () => {
+    const ta = document.querySelector('#deck-words textarea');
+    if (!ta) return;
+    const now = Date.now();
+    const fronts = [...loadDeck()]
+      .sort((a, b) => (a.due <= now ? 0 : 1) - (b.due <= now ? 0 : 1))
+      .map(c => c.front).slice(0, 30);
+    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')
+      .set.call(ta, JSON.stringify(fronts));
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  window.addEventListener('storage', (e) => {
+    if (e.key !== KEY) return;
+    renderWordlist();
+    syncDeckWords();
+  });
 
   // Browser TTS (same voice logic as web/flashcards.html): each tutor bubble
   // has a .spk button whose data-speak carries the Chinese-only text.
@@ -446,9 +478,20 @@ APP_JS = """
       el.dataset.filled = '1';
       renderWordlist();
     };
+    const ensureDeckSync = () => {
+      const ta = document.querySelector('#deck-words textarea');
+      if (!ta || ta.dataset.synced) return;
+      ta.dataset.synced = '1';
+      // repeat after mount settles: a sync dispatched before Gradio's reactive
+      // binding attaches is overwritten by the component's initial value
+      syncDeckWords();
+      setTimeout(syncDeckWords, 800);
+      setTimeout(syncDeckWords, 2000);
+    };
     new MutationObserver(() => {
       ensureStarters();
       ensureWordlist();
+      ensureDeckSync();
       const chat = document.querySelector('.chat');
       if (!chat || chat.childElementCount === lastCount) return;
       lastCount = chat.childElementCount;
@@ -456,6 +499,7 @@ APP_JS = """
     }).observe(document.body, { childList: true, subtree: true });
     ensureStarters();
     ensureWordlist();
+    ensureDeckSync();
   };
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', installObserver);
@@ -525,16 +569,59 @@ def render_chat(raw: list[dict]) -> str:
     return f'<div class="chat">{inner}</div>'
 
 
-def respond(user_msg: str, raw: list[dict], mode: str):
-    """user message + raw history → model reply. Returns (chat HTML, raw history, cleared box)."""
+# Target words for conversation mode: the student's own collected flashcard
+# words first (the deck lives client-side, so APP_JS mirrors the word list into
+# a hidden textbox), padded to 5 with random HSK-5 seeds. Picked once per
+# conversation and kept until 清空 so the tutor can keep circling back to them.
+HSK_VOCAB = [
+    line.strip() for line in c.VOCAB_FILE.read_text(encoding="utf-8").splitlines()
+    if line.strip() and not line.startswith("#")
+]
+
+
+def pick_targets(deck_json: str) -> list[str]:
+    try:
+        deck_words = [w for w in json.loads(deck_json or "[]") if isinstance(w, str) and w.strip()]
+    except (json.JSONDecodeError, TypeError):
+        deck_words = []
+    targets = deck_words[:3]
+    pool = [w for w in HSK_VOCAB if w not in targets]
+    targets += random.sample(pool, k=min(5 - len(targets), len(pool)))
+    return targets
+
+
+def render_targets(targets: list[str] | None) -> str:
+    if not targets:
+        return ""
+    chips = "".join(
+        f'<span class="tg">{annotate(w).replace(" title=\"", " data-tip=\"")}</span>'
+        for w in targets
+    )
+    return f'<div class="targets-row"><span class="targets-label">目标词 · practice</span>{chips}</div>'
+
+
+def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str, targets: list[str] | None):
+    """user message + raw history → model reply.
+    Returns (chat HTML, raw history, cleared box, targets state, targets bar HTML)."""
+    conversational = "聊天" in mode
     if not user_msg.strip():
-        return render_chat(raw), raw, ""
-    system = c.CONVERSATION_PROMPT if "聊天" in mode else c.SYSTEM_PROMPT_APP
+        return render_chat(raw), raw, "", targets, render_targets(targets if conversational else None)
+    if conversational:
+        if not targets:
+            targets = pick_targets(deck_json)
+        system = c.CONVERSATION_PROMPT + (
+            f"\n- 本次对话的目标生词：{'、'.join(targets)}。"
+            "每次回复都要做到这两点之一：要么自然地用上一个目标生词，"
+            "要么直接请学生用其中一个词回答你的问题（比如“用‘承受’说说你的感受”）。"
+            "已经练过的词就换下一个。"
+        )
+    else:
+        system = c.SYSTEM_PROMPT_APP
     raw = raw + [{"role": "user", "content": user_msg}]
     messages = [{"role": "system", "content": system}] + raw
     reply = llm.create_chat_completion(messages, temperature=0.7, max_tokens=512)["choices"][0]["message"]["content"]
     raw = raw + [{"role": "assistant", "content": reply}]
-    return render_chat(raw), raw, ""
+    return render_chat(raw), raw, "", targets, render_targets(targets if conversational else None)
 
 
 def flashcards_srcdoc() -> str:
@@ -550,6 +637,8 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
     with gr.Tab("对话 · chat"):
         chat_html = gr.HTML(render_chat([]))
         raw_state = gr.State([])
+        targets_state = gr.State(None)
+        targets_bar = gr.HTML("")
         mode = gr.Radio(
             ["问答 · Q&A", "聊天 · conversation"], value="问答 · Q&A",
             show_label=False, elem_id="mode", container=False,
@@ -558,13 +647,20 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
             placeholder="用中文或英文问我… (ask in Chinese or English)",
             show_label=False, submit_btn=True, elem_id="ask",
         )
+        # Mirror of the client-side flashcard deck (word fronts as JSON, due-first).
+        # The deck lives in localStorage, so APP_JS keeps this hidden box in sync —
+        # it's how the student's own words reach pick_targets() on the server.
+        deck_words = gr.Textbox("[]", elem_id="deck-words", elem_classes=["hidden-input"],
+                                show_label=False, container=False)
         # Starter chips live in plain HTML; APP_JS fills them with a fresh random
         # sample from STARTER_POOL on every page load and wires the clicks.
         gr.HTML('<div class="starters-row" id="starters"></div>')
 
-        msg.submit(respond, [msg, raw_state, mode], [chat_html, raw_state, msg])
+        msg.submit(respond, [msg, raw_state, mode, deck_words, targets_state],
+                   [chat_html, raw_state, msg, targets_state, targets_bar])
         clear = gr.Button("清空 · clear", elem_id="clear-btn")
-        clear.click(lambda: (render_chat([]), [], ""), None, [chat_html, raw_state, msg])
+        clear.click(lambda: (render_chat([]), [], "", None, ""), None,
+                    [chat_html, raw_state, msg, targets_state, targets_bar])
     with gr.Tab("卡片 · flashcards"):
         gr.HTML(flashcards_srcdoc())
     with gr.Tab("词表 · word list"):

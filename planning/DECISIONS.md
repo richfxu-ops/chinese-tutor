@@ -2,6 +2,11 @@
 
 > Dated log of notable choices and *why*, so rationale isn't lost. Newest first.
 
+## 2026-07-10 — Conversation mode v2: tutor drives + target words from the student's own deck
+- **Decision:** Rewrote `CONVERSATION_PROMPT` so the tutor *leads* (brings topics, shares its own experiences, open-ended questions only, follows up on short answers) and added per-conversation **target words**: up to 3 of the student's collected flashcard words (due-first) padded to 5 with random HSK-5 seeds. Targets are chosen once per conversation (reset on 清空), shown as a pinyin-annotated strip above the input, and injected into the system prompt with a hard rule: every reply either uses a target word or asks the student to use one.
+- **Why:** User feedback — v1 was reactive ("I have to carry the conversation") and didn't exercise vocabulary. The deck lives client-side, so APP_JS mirrors the word fronts into a hidden textbox (`#deck-words`) that feeds `pick_targets()`; the mirror must re-sync after mount (a value set before Gradio's binding attaches gets overwritten). The forceful "every reply" phrasing mattered: the softer "find natural opportunities" version was ignored by the 7B.
+- **Implications:** Verified live over 3 turns: self-disclosure + open question openings, lazy answers get pushed past, target words (匆忙, 单独) woven in 2/2 turns. This behavior is the spec for the pending conversation-task training data.
+
 ## 2026-07-10 — Conversation mode: a second serve-time system prompt, not a rule bolted onto Q&A
 - **Decision:** Added `CONVERSATION_PROMPT` (config.py) and a 问答/聊天 mode toggle in the chat tab. In 聊天 mode the tutor chats in short Chinese-forward turns, corrects the student's errors in passing (correct form + one-line English why), and must end each reply with a question. Full English translations are dropped in this mode — the reading layer (pinyin + hover gloss) carries comprehension.
 - **Why:** The "end with a question" rule appended to the Q&A prompt lost to the fine-tune (trained replies end with encouragement, not questions — the user hit this). Reframing the whole task in a separate system prompt works with the base model's instruction-following instead of fighting 810 single-turn examples; verified live: error caught + corrected, conversational tone, question ending.

@@ -48,3 +48,4 @@
 - [x] Chat polish: random starter chips per load, 🔊 browser TTS on replies, follow-up-question prompt rule #ship #M3
 - [x] Conversation mode: 聊天 toggle — Chinese-forward chat, corrects errors in passing, ends with a question #ship #M3
 - [x] 词表 word-list tab: table of collected cards + per-row removal, synced with flashcards #ship #M3
+- [x] Conversation mode v2: tutor drives (topics, self-disclosure, open questions) + target words from the student's deck #ship #M3
