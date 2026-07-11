@@ -225,6 +225,11 @@ footer {{ display:none !important; }}
 .b.u .who {{ color:var(--ink-soft); text-align:right; }}
 .b .msg {{ font-family:"EB Garamond",var(--hanzi-kai); font-size:1.17rem; line-height:2.55; }}
 .b .msg, .b .msg * {{ color:var(--ink) !important; }}
+/* streaming: plain text needs no ruby headroom; cursor blinks cinnabar */
+.b .msg.plain {{ line-height:1.9; }}
+.cursor {{ color:var(--cinnabar) !important; animation:blink 1s steps(1) infinite; }}
+@keyframes blink {{ 50% {{ opacity:0; }} }}
+.b .who .note {{ text-transform:none; letter-spacing:.05em; opacity:.65; }}
 /* .fill (filled-in translations, either direction) deliberately unstyled:
    they read exactly like model-authored text — the class is only a hook */
 ruby {{ ruby-position:over; margin:0 .02em; }}
@@ -816,6 +821,7 @@ APP_JS = """
       // lead time before their submits)
       syncDeckWords();
     };
+    let lastHeight = 0;
     new MutationObserver(() => {
       ensureStarters();
       ensureWordlist();
@@ -824,9 +830,16 @@ APP_JS = """
       ensureMic();
       checkCardRes();
       const chat = document.querySelector('.chat');
-      if (!chat || chat.childElementCount === lastCount) return;
-      lastCount = chat.childElementCount;
-      jumpToNewest(chat);
+      if (!chat) return;
+      if (chat.childElementCount !== lastCount) {
+        lastCount = chat.childElementCount;
+        jumpToNewest(chat);
+      } else if (chat.scrollHeight !== lastHeight
+                 && chat.scrollHeight - chat.scrollTop - chat.clientHeight < 160) {
+        // streaming growth: stay pinned to the bottom unless the user scrolled up
+        chat.scrollTop = chat.scrollHeight;
+      }
+      lastHeight = chat.scrollHeight;
     }).observe(document.body, { childList: true, subtree: true });
     ensureStarters();
     ensureWordlist();
@@ -1187,12 +1200,18 @@ def strip_for_llm(raw: list[dict]) -> list[dict]:
 
 def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
             targets: list[str] | None, review_only: bool):
-    """user message + raw history → model reply.
-    Returns (chat HTML, raw history, cleared box, targets state, targets bar HTML)."""
+    """user message + raw history → model reply, STREAMED.
+
+    A generator: tokens render live in a plain bubble (the reading layer needs
+    whole words, so annotating a half-generated sentence would misparse), then
+    a short 加注中 pass runs disambiguation and translation fills, and the
+    final yield swaps in the fully annotated transcript.
+    Yields (chat HTML, raw history, cleared box, targets state, targets bar)."""
     conversational = "聊天" in mode
+    bar = lambda: render_targets(targets if conversational else None)  # noqa: E731
     if not user_msg.strip():
-        return (render_chat(raw), raw, "", targets,
-                render_targets(targets if conversational else None))
+        yield (render_chat(raw), raw, "", targets, bar())
+        return
     if conversational:
         if not targets:
             targets = pick_targets(deck_json, review_only)
@@ -1202,10 +1221,37 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
         system = c.SYSTEM_PROMPT_APP
     raw = raw + [{"role": "user", "content": user_msg}]
     messages = [{"role": "system", "content": system}] + strip_for_llm(raw)
-    reply = llm.create_chat_completion(messages, temperature=0.7, max_tokens=512)["choices"][0]["message"]["content"]
+
+    # history annotated once; the in-progress reply rides in a plain bubble
+    base = render_chat(raw)[: -len("</div>")]
+
+    def with_stream_bubble(text: str, note: str = "") -> str:
+        inner = html.escape(text).replace("\n", "<br>")
+        cursor = "" if note else '<span class="cursor">▌</span>'
+        who = "老师 Tutor" + (f'<span class="note"> · {note}</span>' if note else "")
+        return (base + f'<div class="b t"><div class="who">{who}</div>'
+                f'<div class="msg plain">{inner}{cursor}</div></div></div>')
+
+    reply = ""
+    try:
+        n = 0
+        for chunk in llm.create_chat_completion(
+            messages, temperature=0.7, max_tokens=512, stream=True,
+        ):
+            delta = chunk["choices"][0]["delta"].get("content")
+            if not delta:
+                continue
+            reply += delta
+            n += 1
+            if n % 8 == 0:
+                yield (with_stream_bubble(reply), raw, "", targets, bar())
+    except Exception:  # noqa: BLE001 — keep whatever streamed before the error
+        pass
+    reply = reply.strip() or "（生成失败，请再试一次 · generation failed — try again）"
     raw = raw + [{"role": "assistant", "content": reply}]
-    # one shared override dict for the two new messages (a word appearing in
-    # both almost certainly carries the same sense)
+
+    # reading-layer pass: sense picks, translation fills, prompt translation
+    yield (with_stream_bubble(reply, note="加注中 annotating"), raw, "", targets, bar())
     ov = disambiguate([user_msg, reply])
     if ov:
         raw[-2]["tips"] = ov
@@ -1219,8 +1265,7 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
         zh = translate_user_to_chinese(user_msg)
         if zh:
             raw[-2]["fills"] = {user_msg.count("\n"): zh}
-    return (render_chat(raw), raw, "", targets,
-            render_targets(targets if conversational else None))
+    yield (render_chat(raw), raw, "", targets, bar())
 
 
 # List markers / labels the model sometimes prefixes to its lines ("1. ", "例句：")
