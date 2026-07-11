@@ -328,12 +328,17 @@ button[role="tab"][aria-selected="true"] {{
 .targets-row .tg {{ font-family:var(--hanzi-kai); color:var(--ink); }}
 
 /* ---------- mode toggle ---------- */
-#mode-row {{ align-items:center; gap:1rem; }}
-#review-mode {{ flex-grow:0 !important; }}
-#review-mode label {{ display:flex; align-items:center; gap:.4rem; cursor:pointer; }}
-#review-mode span {{ font-family:"IBM Plex Mono",ui-monospace,monospace !important;
-                    font-size:.68rem !important; letter-spacing:.1em;
-                    text-transform:uppercase; color:var(--ink-soft) !important; }}
+#mode-row {{ align-items:center; gap:1rem; flex-wrap:wrap; }}
+/* strip Gradio's block chrome: no border/padding, size to the label text */
+#review-mode {{ flex:0 0 auto !important; width:auto !important;
+               min-width:fit-content !important; border:none !important;
+               background:transparent !important; padding:0 !important;
+               box-shadow:none !important; overflow:visible !important; }}
+#review-mode label {{ display:flex; align-items:center; gap:.45rem;
+                     cursor:pointer; white-space:nowrap; }}
+#review-mode .label-text {{ font-family:"IBM Plex Mono",ui-monospace,monospace !important;
+                           font-size:.68rem !important; letter-spacing:.1em;
+                           text-transform:uppercase; color:var(--ink-soft) !important; }}
 #review-mode input {{ accent-color:var(--cinnabar); }}
 #mode {{ margin:.15rem 0 .1rem; }}
 #mode label {{
