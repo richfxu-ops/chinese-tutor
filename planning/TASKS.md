@@ -11,9 +11,8 @@
 - [ ] (P3) v2 roadmap: voice chat — speak your Chinese, Whisper-class ASR #roadmap
 
 ## Next
-- [ ] (P1) RUN: gen_data.py --only conversation (smoke --limit 3 first, then full 100) #data #run
-- [ ] (P1) RUN: retrain — train_colab.ipynb on Colab → adapter → eval → merge → GGUF → swap outputs/*.gguf #train #run
 - [ ] (P2) Fill README before/after from outputs/eval_report.md #ship #M3
+- [ ] (P3) Data iteration: enforce English-explanation compliance in conversation corrections (~1/5 slip through, model reproduces it) #data
 
 ## In Progress
 
@@ -50,3 +49,6 @@
 - [x] Conversation mode: 聊天 toggle — Chinese-forward chat, corrects errors in passing, ends with a question #ship #M3
 - [x] 词表 word-list tab: table of collected cards + per-row removal, synced with flashcards #ship #M3
 - [x] Conversation mode v2: tutor drives (topics, self-disclosure, open questions) + target words from the student's deck #ship #M3
+- [x] Generate 100 multi-turn conversations (2 smoke iterations: closed-world corrections fix) → 900/100 jsonl #data
+- [x] Retrain v2 on Colab A100 (114 steps; T4 attempts hit stale-data + eval-OOM, both fixed) → merge → GGUF → swapped into outputs/, v1 kept as rollback #train
+- [x] Verified v2 weights live: drives conversation, pushes past lazy answers, corrects planted 见面她 error, weaves target words; Q&A bilingual format intact #train
