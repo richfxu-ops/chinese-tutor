@@ -681,6 +681,23 @@ APP_JS = """
     ta.focus();
   });
 
+  // 问老师 from a flashcard back (same-origin iframe posts {type:'ask-tutor'}):
+  // switch to the chat tab, fill the ask box, submit. The 300ms beats between
+  // steps let Gradio's tab switch and (async) store update settle — the same
+  // lead-time lesson as the deck mirror.
+  window.addEventListener('message', (e) => {
+    if (!e.data || e.data.type !== 'ask-tutor' || typeof e.data.text !== 'string') return;
+    const chatTab = [...document.querySelectorAll('button[role="tab"]')]
+      .find(t => t.textContent.includes('对话'));
+    if (chatTab) chatTab.click();
+    setTimeout(() => {
+      const ta = document.querySelector('#ask textarea');
+      if (!ta) return;
+      setNative(ta, e.data.text);
+      setTimeout(() => document.querySelector('#ask .submit-button')?.click(), 300);
+    }, 300);
+  });
+
   // The transcript is capped (overflow-y): jump to the newest message when one
   // arrives. Three traps, all hit in testing:
   //  - Gradio 6 patches the .chat node IN PLACE on update (it is not replaced),

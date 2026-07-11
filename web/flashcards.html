@@ -57,6 +57,10 @@
   .rate.easy{border-color:var(--blue);color:var(--blue)}
   .editbtn{border:none;background:none;cursor:pointer;font-size:1rem;color:var(--faint);padding:.1rem .3rem;vertical-align:middle;float:right}
   .editbtn:hover{color:var(--seal);transform:none}
+  .askrow{margin-top:.7rem}
+  .askbtn{font-family:var(--mono);font-size:.68rem;letter-spacing:.08em;color:var(--seal);
+          background:transparent;border:1px dotted var(--seal);border-radius:3px;padding:.3rem .7rem}
+  .askbtn:hover{background:var(--seal-wash);border-style:solid}
   .editfield{font-family:var(--sans);font-size:.95rem;padding:.5rem .6rem;border:1px solid var(--line);border-radius:4px;background:var(--surface-2);color:var(--ink);width:100%}
   .spk{border:none;background:none;cursor:pointer;font-size:1.3rem;line-height:1;padding:.1rem .3rem;vertical-align:middle;opacity:.55}
   .spk:hover{opacity:1;transform:none}
@@ -222,12 +226,15 @@ function frontView(c){
 }
 function backView(c){
   const editBtn = `<button class="editbtn" onclick="editCard()" title="编辑 · edit this card">✎</button>`;
+  const askRow = `<div class="askrow"><button class="askbtn" onclick="askTutor()"
+      title="在对话里问老师 · sends the question in the chat tab">问老师 · ask the tutor</button></div>`;
   if (c.kind === "fix")
     return `<div class="card">
         <div><span class="badge">改错 · fix it</span>${editBtn}</div>
         <div class="front sent">${esc(c.front)}</div>
         <div class="fixline">✓ ${esc(c.fix)} <button class="spk sm" onclick="speak(current.fix)" title="Play (p)">🔊</button></div>
         ${c.why ? `<div class="example">${esc(c.why)}</div>` : ``}
+        ${askRow}
       </div>
       <div class="btns">
         ${rateBtn("again","Again",c)}${rateBtn("hard","Hard",c)}${rateBtn("good","Good",c)}${rateBtn("easy","Easy",c)}
@@ -238,10 +245,23 @@ function backView(c){
       <div class="gloss">${esc(c.gloss)}</div>
       ${c.example ? `<div class="example">${esc(c.example)} <button class="spk sm" onclick="speak(current.example)" title="Play sentence">🔊</button>
         ${c.example_en ? `<div class="example-en">${esc(c.example_en)}</div>` : ``}</div>` : ``}
+      ${askRow}
     </div>
     <div class="btns">
       ${rateBtn("again","Again",c)}${rateBtn("hard","Hard",c)}${rateBtn("good","Good",c)}${rateBtn("easy","Easy",c)}
     </div>`;
+}
+
+// Hand the question to the parent page (same-origin iframe): it switches to
+// the chat tab, fills the ask box, and submits — so the tutor answers with
+// the full reading layer (pinyin + hover glosses) rather than inside a card.
+function askTutor(){
+  if(!current) return;
+  const q = current.kind === "fix"
+    ? `为什么要说“${current.fix}”？请再给我解释一下这个纠错。`
+    : `再给我解释一下“${current.front}”这个词吧，最好举几个例子。`;
+  parent.postMessage({ type: "ask-tutor", text: q }, "*");
+  toast("已发给老师 · asked in the chat tab");
 }
 
 // ---- edit-in-review: swap the card back for a small form -------------------
