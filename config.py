@@ -52,6 +52,17 @@ SYSTEM_PROMPT = (
     "- 只用简体字。语气友好、简洁，多鼓励，不要长篇大论。"
 )
 
+# Served (app.py) variant of the prompt. The training data under-translates framing
+# lines — greetings, closing encouragement, usage notes got no English (the per-task
+# instructions only demanded translations for the example sentences), and the model
+# learned that. This inference-only line nudges it toward fully bilingual output.
+# Deliberately NOT used by gen_data.py: training data keeps the original SYSTEM_PROMPT
+# so this stays a cheap, reversible experiment (see DECISIONS.md 2026-07-10).
+SYSTEM_PROMPT_APP = SYSTEM_PROMPT + (
+    "\n- 特别注意：所有中文句子——包括开头的回应、结尾的鼓励和用法说明——"
+    "都必须附上对应的英文翻译，不能只翻译例句。"
+)
+
 # --------------------------------------------------------------------------- #
 # Data generation
 # --------------------------------------------------------------------------- #

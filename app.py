@@ -108,7 +108,7 @@ def respond(user_msg: str, raw: list[dict]):
     if not user_msg.strip():
         return render_chat(raw), raw, ""
     raw = raw + [{"role": "user", "content": user_msg}]
-    messages = [{"role": "system", "content": c.SYSTEM_PROMPT}] + raw
+    messages = [{"role": "system", "content": c.SYSTEM_PROMPT_APP}] + raw
     reply = llm.create_chat_completion(messages, temperature=0.7, max_tokens=512)["choices"][0]["message"]["content"]
     raw = raw + [{"role": "assistant", "content": reply}]
     return render_chat(raw), raw, ""

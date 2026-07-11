@@ -2,6 +2,11 @@
 
 > Dated log of notable choices and *why*, so rationale isn't lost. Newest first.
 
+## 2026-07-10 — Untranslated framing lines: inference-only prompt nudge (no retrain)
+- **Decision:** The tuned model translated only example sentences, leaving greetings/closers/usage notes Chinese-only. Fix chosen: a serve-time-only `SYSTEM_PROMPT_APP` in config.py (adds one line demanding English for *every* Chinese sentence); `app.py` uses it, `gen_data.py` keeps the original `SYSTEM_PROMPT`.
+- **Why:** The behavior is trained-in — the teacher data has the same pattern because the per-task instructions only required translations "per example sentence". A retrain is overkill for a cosmetic gap; the nudge is free and reversible. Tested live: usage notes and closers now get translated (occasionally a 2–4-word greeting like 好，我们来看看 stays Chinese-only — acceptable, decodable via the reading layer).
+- **Implications:** Breaks the "train-time and serve-time prompts identical" invariant, deliberately and documented in config.py. If we ever regenerate data, fix the task instructions instead and drop `SYSTEM_PROMPT_APP`.
+
 ## 2026-07-10 — Reading layer in Gradio: keep gr.HTML, `!important` colors + CSS tooltip (no iframe)
 - **Decision:** Render the transcript with `gr.HTML` (unchanged), fix readability with `!important` color rules, and show the hover gloss as a pure-CSS tooltip (`.hz:hover::after` reading a `data-tip` attribute) instead of the native `title` tooltip. `render_chat` rewrites `annotate()`'s `title=` → `data-tip=` for display; `annotate.py` and the standalone `docs/` pages keep native `title`.
 - **Why:** DOM inspection showed `gr.HTML` does **no** sanitization (verbatim `innerHTML`) — `<style>`, `ruby/rt`, and all attributes survive, so the earlier "Gradio strips it" theory was wrong and an `<iframe srcdoc>` workaround is unnecessary. The real bug was CSS: Gradio ships `.gradio-container-* .prose * { color: var(--body-text-color) }`, a universal selector that recolors every element and beats inherited colors — in dark mode that's near-white text on our light bubbles. `!important` is the only clean win against a universal selector we don't control. The CSS tooltip replaces native `title` because native tooltips have a ~1s delay and are unreliable in embedded webviews; it's also instantly verifiable.
