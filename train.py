@@ -120,6 +120,9 @@ def main() -> None:
         num_train_epochs=t.epochs,
         max_steps=args.max_steps,
         per_device_train_batch_size=t.per_device_batch_size,
+        # eval defaults to batch 8, which OOMs a T4 at the epoch boundary now that
+        # conversation rows pad toward max_seq_len — pin it to the train batch size
+        per_device_eval_batch_size=t.per_device_batch_size,
         gradient_accumulation_steps=t.grad_accum_steps,
         learning_rate=t.lr,
         lr_scheduler_type=t.lr_scheduler,
