@@ -357,10 +357,12 @@ button[role="tab"][aria-selected="true"] {{
 .wl-table td.ex {{ color:var(--ink-soft); font-size:.9rem; }}
 .wl-table td.st {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.75rem;
                   color:var(--ink-soft); white-space:nowrap; }}
-.wl-edit {{ cursor:text; }}
+.wl-edit {{ cursor:text; min-height:1.1em; }}
 .wl-edit:hover {{ outline:1px dotted var(--hairline); outline-offset:-1px; }}
 .wl-edit:focus {{ outline:2px solid var(--cinnabar); outline-offset:-2px;
                  background:var(--sheet); }}
+.wl-edit:empty::before {{ content:attr(data-ph); opacity:.45; font-style:italic; }}
+.wl-en {{ font-style:italic; font-size:.85rem; color:var(--ink-soft); margin-top:.15rem; }}
 .wl-remove {{ border:none; background:none; color:var(--ink-soft); cursor:pointer;
              font-size:.95rem; padding:.1rem .3rem; transition:color .15s; }}
 .wl-remove:hover {{ color:var(--cinnabar); }}
@@ -512,11 +514,13 @@ APP_JS = """
         'Nothing collected yet — click any word in the chat to add it.</div>';
       return;
     }
-    // gloss/example (fix/why on correction cards) are editable in place
+    // gloss/example/translation (fix/why on correction cards) are editable in place
+    const editable = (c, field, extra) =>
+      ' class="wl-edit' + (extra ? ' ' + extra : '') + '" contenteditable="true" spellcheck="false"'
+      + ' data-fid="' + escHtml(c.id) + '" data-field="' + field + '"'
+      + ' title="点击编辑 · click to edit"';
     const edit = (c, field, cls, val) =>
-      '<td class="' + cls + ' wl-edit" contenteditable="true" spellcheck="false" '
-      + 'data-fid="' + escHtml(c.id) + '" data-field="' + field + '" '
-      + 'title="点击编辑 · click to edit">' + escHtml(val || '') + '</td>';
+      '<td' + editable(c, field, cls) + '>' + escHtml(val || '') + '</td>';
     const rows = [...deck].reverse().map(c => {
       const cells = c.kind === 'fix'
         ? '<td class="hanzi sent">' + escHtml(c.front) + '</td>'
@@ -526,7 +530,10 @@ APP_JS = """
         : '<td class="hanzi">' + escHtml(c.front) + '</td>'
           + '<td class="py">' + escHtml(c.pinyin || '') + '</td>'
           + edit(c, 'gloss', '', c.gloss)
-          + edit(c, 'example', 'ex', c.example);
+          // example + its translation as two separately-editable blocks
+          + '<td class="ex"><div' + editable(c, 'example') + '>' + escHtml(c.example || '') + '</div>'
+          + '<div' + editable(c, 'example_en', 'wl-en') + ' data-ph="translation…">'
+          + escHtml(c.example_en || '') + '</div></td>';
       return '<tr>' + cells
         + '<td class="st">' + (c.reps > 0 ? c.reps + '×' : 'new') + '</td>'
         + '<td><button class="wl-remove" title="移除 · remove" data-fid="'
@@ -681,19 +688,23 @@ APP_JS = """
     ta.focus();
   });
 
-  // 问老师 from a flashcard back (same-origin iframe posts {type:'ask-tutor'}):
-  // switch to the chat tab, fill the ask box, submit. The 300ms beats between
-  // steps let Gradio's tab switch and (async) store update settle — the same
-  // lead-time lesson as the deck mirror.
+  // 问老师 from a flashcard back (the cards iframe posts {type:'ask-tutor'}):
+  // switch to the chat tab, fill the ask box, submit. Only messages from OUR
+  // iframe are honored (e.source check — srcdoc frames have origin 'null', so
+  // source identity is the usable credential). This path submits without the
+  // user ever focusing the ask box, so it must sync the deck mirror itself —
+  // first thing, giving the store the full 600ms of the two beats below to
+  // settle (the same lead-time lesson as the focusin listener above).
   window.addEventListener('message', (e) => {
+    const cards = document.querySelector('.cards-frame');
+    if (!cards || e.source !== cards.contentWindow) return;
     if (!e.data || e.data.type !== 'ask-tutor' || typeof e.data.text !== 'string') return;
+    syncDeckWords();
     const chatTab = [...document.querySelectorAll('button[role="tab"]')]
       .find(t => t.textContent.includes('对话'));
     if (chatTab) chatTab.click();
     setTimeout(() => {
-      const ta = document.querySelector('#ask textarea');
-      if (!ta) return;
-      setNative(ta, e.data.text);
+      setAsk(e.data.text);
       setTimeout(() => document.querySelector('#ask .submit-button')?.click(), 300);
     }, 300);
   });
@@ -730,7 +741,9 @@ APP_JS = """
       const ta = document.querySelector('#deck-words textarea');
       if (!ta || ta.dataset.synced) return;
       ta.dataset.synced = '1';
-      // best-effort early sync; the submit-time capture hook is the guarantee
+      // best-effort early sync; the real guarantees are the focusin listener
+      // on the ask box and the ask-tutor message handler (both re-sync with
+      // lead time before their submits)
       syncDeckWords();
     };
     new MutationObserver(() => {
@@ -1004,6 +1017,13 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
             render_targets(targets if conversational else None))
 
 
+# List markers / labels the model sometimes prefixes to its lines ("1. ", "例句：")
+_UNLABEL = re.compile(r"^\s*(?:\d+[.、)]|[-•*]|例句[:：]?|翻译[:：]?|Translation[:：]?)\s*")
+# A trailing run of English glued onto the example line (我很高兴，I am happy):
+# stripped so the zh TTS never voices it — the translation belongs in example_en.
+_TRAILING_EN = re.compile(r"[，,\s]*[A-Za-z][A-Za-z0-9 ,.'’!?;:-]{7,}[.!?]?\s*$")
+
+
 def gen_card_example(req_json: str) -> str:
     """Write a fresh HSK-5 example sentence for a just-collected flashcard.
 
@@ -1024,11 +1044,12 @@ def gen_card_example(req_json: str) -> str:
     out = llm.create_chat_completion(
         [{"role": "user", "content": prompt}], temperature=0.7, max_tokens=120,
     )["choices"][0]["message"]["content"].strip()
-    # strip list markers / labels the model sometimes prefixes ("1. ", "例句：")
-    unlabel = re.compile(r"^\s*(?:\d+[.、)]|[-•*]|例句[:：]?|翻译[:：]?|Translation[:：]?)\s*")
-    lines = [unlabel.sub("", line).strip().strip('"“”')
+    lines = [_UNLABEL.sub("", line).strip().strip('"“”')
              for line in out.splitlines() if line.strip()]
     example = lines[0][:120] if lines else ""
+    trimmed = _TRAILING_EN.sub("", example).strip()
+    if trimmed and word in trimmed:          # keep the trim only if it leaves a valid example
+        example = trimmed
     if not example or word not in example:   # empty or wandered off — keep the scraped example
         return ""
     # the translation is the first mostly-English line after the example; kept

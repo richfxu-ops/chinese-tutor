@@ -2,6 +2,16 @@
 
 > Dated log of notable choices and *why*, so rationale isn't lost. Newest first.
 
+## 2026-07-11 — Deck-mirror sync: lead time before submit, not timers or submit-instant writes
+- **Decision:** The client-side deck mirror (#deck-words) syncs on ask-box focusin and at the start of the 问老师 message handler — every path that leads to a submit gets the write in with real lead time. The original mount-time retry timers (800/2000ms) and a submit-instant capture-phase sync are both rejected.
+- **Why:** Measured behavior: a value written into a Gradio-bound textarea at submit-instant updates the DOM but loses to Gradio's async store snapshot — the server sees the stale value. Fixed timers race unbounded mount latency. Lead time (focus precedes typing; the 问老师 handler syncs 600ms before its click) is the only shape that reliably wins.
+- **Implications:** Any future programmatic-submit path MUST call syncDeckWords() itself before its submit — the round-2 review caught 问老师 forgetting exactly this. The message channel is also authenticated by e.source (srcdoc frames have origin "null", so source identity is the only usable credential).
+
+## 2026-07-11 — Correction-chip gate: revision overlap, threshold validated against training data
+- **Decision:** A 应该说/要说 quote only becomes a save-correction chip if ≥60% of its unique hanzi come from the student's previous message (plus praise-marker and 不/别 guards). Threshold kept at 0.6 after measuring the training set: 144/150 trained corrections score ≥0.6; the 6 below it are grammar-pattern quotes, not corrections worth carding.
+- **Why:** The unguarded regex chipped on praise (你说得对，应该说"…"也可以), pairing a CORRECT student sentence as a "mistake." A real correction revises the student's sentence, so character reuse is the reliable signal — and empirically the trained format satisfies it.
+- **Implications:** If the correction format is ever retrained, re-measure the overlap distribution before trusting the 0.6 constant. The same review round confirmed the trained model emits zero pinyin (0/1321 assistant turns), which is what keeps the _mostly_ascii English-detection heuristics safe.
+
 ## 2026-07-10 — Conversation task type: multi-turn training data to bake in the v2 behavior
 - **Decision:** Added a multi-turn "conversation" task to the data pipeline (100 conversations, 1 teacher call each): system turn = `config.conversation_system(targets)` — byte-identical to what app.py serves — followed by 8–12 alternating turns. The teacher is instructed to make the student lazy twice and wrong 1–2 times, and the tutor to demonstrate every v2 rule (drive, push past lazy answers, correct + move on, target word every turn, open question every turn). `gen_data.py --only conversation` generates just this task and APPENDS to the existing jsonl (a full run still regenerates everything).
 - **Why:** v2 behavior currently holds by prompt force against a fine-tune trained on single-turn Q&A; training on it makes it robust. Sharing the exact serve-time system prompt in the data is the point — the model learns to associate that prompt with that behavior.

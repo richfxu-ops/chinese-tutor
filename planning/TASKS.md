@@ -58,3 +58,7 @@
 - [x] Model-written flashcard examples (async via hidden req/res channel) + CJK-ratio fix for the scraped placeholder #ship
 - [x] Editable cards: click-to-edit gloss/example in the word list; ✎ edit form in the review widget #ship
 - [x] Model-written starter chips at startup (seeded random vocab/grammar, one per task type; static pool kept as loud fallback) #ship
+- [x] Code review round 1 (session diff): 6 confirmed findings fixed (false correction chips, gen_card_example guards, startup-safe starters, py<3.12 f-string, task-aware eval rubric, fix-card 'p' TTS) + follow-ups 8–10 (focus-time deck sync, tips on message dicts, helper dedup) #quality
+- [x] Flashcard example sentences get English translations (separate example_en field; review card, edit form, word list, Anki export) #ship
+- [x] 问老师 button on card backs → auto-asks in the chat tab (word: re-explain; 改错: why) #ship
+- [x] Code review round 2: 问老师 deck-sync bypass closed + e.source auth on the message channel, trailing-English trim on examples, word-list translation editing, comment/dedup cleanups; overlap gate + pinyin-leak candidates empirically cleared against training data #quality

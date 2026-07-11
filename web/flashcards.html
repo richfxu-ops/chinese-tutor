@@ -260,6 +260,8 @@ function askTutor(){
   const q = current.kind === "fix"
     ? `为什么要说“${current.fix}”？请再给我解释一下这个纠错。`
     : `再给我解释一下“${current.front}”这个词吧，最好举几个例子。`;
+  // targetOrigin must stay "*": srcdoc frames have origin "null", so a named
+  // origin can't match. The parent authenticates by e.source instead.
   parent.postMessage({ type: "ask-tutor", text: q }, "*");
   toast("已发给老师 · asked in the chat tab");
 }
