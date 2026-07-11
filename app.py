@@ -225,8 +225,8 @@ footer {{ display:none !important; }}
 .b.u .who {{ color:var(--ink-soft); text-align:right; }}
 .b .msg {{ font-family:"EB Garamond",var(--hanzi-kai); font-size:1.17rem; line-height:2.55; }}
 .b .msg, .b .msg * {{ color:var(--ink) !important; }}
-/* filled-in translation for a line the model left Chinese-only */
-.b .msg .fill-en {{ color:var(--ink-soft) !important; font-style:italic; font-size:.92em; }}
+/* .fill-en (filled-in translations) deliberately unstyled: they read exactly
+   like model-authored English — the class stays only as a structural hook */
 ruby {{ ruby-position:over; margin:0 .02em; }}
 rt {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.42em; font-weight:500; }}
 .b .msg rt {{ color:var(--cinnabar) !important; }}
