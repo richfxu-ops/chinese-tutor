@@ -222,13 +222,18 @@ rt {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.42em; font-
 #ask {{ position:relative; }}
 #ask textarea {{ padding-right:5.6rem !important; }}
 .mic-btn {{
-  position:absolute; right:3.4rem; bottom:.5rem; z-index:5;
-  border:none; background:transparent; font-size:1.05rem; line-height:1;
-  cursor:pointer; opacity:.5; padding:.25rem; transition:opacity .15s;
+  /* mirrors the submit button's inset (10px bottom) with an 8px gap to its left */
+  position:absolute; right:50px; bottom:10px; z-index:5;
+  width:30px; height:30px; display:grid; place-items:center; padding:0;
+  background:var(--sheet); border:1px solid var(--hairline); border-radius:3px;
+  color:var(--ink-soft); cursor:pointer; transition:all .15s ease;
 }}
-.mic-btn:hover {{ opacity:1; }}
-@keyframes mic-pulse {{ 50% {{ transform:scale(1.3); filter:drop-shadow(0 0 5px var(--cinnabar)); }} }}
-.mic-btn.rec {{ opacity:1; animation:mic-pulse 1.1s ease-in-out infinite; }}
+.mic-btn:hover {{ color:var(--cinnabar); border-color:var(--cinnabar); }}
+@keyframes mic-pulse {{ 50% {{ box-shadow:0 0 0 6px rgba(179,48,42,.16); }} }}
+.mic-btn.rec {{
+  color:var(--sheet); background:var(--cinnabar); border-color:var(--cinnabar);
+  animation:mic-pulse 1.1s ease-in-out infinite;
+}}
 .starters-row {{ display:flex; flex-wrap:wrap; gap:.45rem; align-items:center; margin-top:.55rem; }}
 .starters-label {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.6rem;
                   letter-spacing:.13em; text-transform:uppercase; color:var(--ink-soft);
@@ -499,7 +504,11 @@ APP_JS = """
     const box = document.querySelector('#ask');
     if (!box || box.querySelector('.mic-btn')) return;
     const btn = document.createElement('button');
-    btn.className = 'mic-btn'; btn.type = 'button'; btn.textContent = '🎤';
+    btn.className = 'mic-btn'; btn.type = 'button';
+    btn.innerHTML = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none"'
+      + ' stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+      + '<rect x="9" y="2" width="6" height="12" rx="3"/>'
+      + '<path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v3"/></svg>';
     btn.title = '点一下，说中文 · click and speak Chinese';
     box.appendChild(btn);
     btn.addEventListener('click', () => {
