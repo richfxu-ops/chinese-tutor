@@ -2,6 +2,16 @@
 
 > Dated log of notable choices and *why*, so rationale isn't lost. Newest first.
 
+## 2026-07-11 — Streaming: plain text live, reading layer swaps in at the end; one lock owns the model
+- **Decision:** respond() is a generator: tokens stream into a PLAIN bubble (blinking cursor), then a 加注中 pass runs the model-assisted annotation (sense picks, translation fills) and the final yield swaps in the annotated transcript. The reading layer is never run on partial text — jieba/pypinyin would misparse half-generated words. render_chat(unclosed=True) is the structural hook for the live bubble (no string surgery on the closed form). ALL model calls go through `generate()`/_LLM_LOCK: Gradio 6 gives each event listener its own concurrency queue, so a card-example request can otherwise hit the non-thread-safe Llama mid-stream — the review found this as a crash-class race.
+- **Why:** Perceived latency: first text within ~1s instead of a 10–30s blank wait. The lock, not per-event concurrency settings, is the correctness boundary because the model is one shared instance.
+- **Implications:** A total generation failure yields a display-only error bubble, restores the typed message to the box, and enters NOTHING into history — a fabricated placeholder would be fed back to the model as fake context on the next turn.
+
+## 2026-07-11 — File-backed deck: union-merge by card id, cards outrank ratings outrank deletions
+- **Decision:** Every deck change pushes the full deck to data/deck.json; save_deck MERGES (union by id, incoming wins per card) instead of overwriting; restore only fires in a browser with no deck key at all. LAN=1 (opt-in, off by default) binds 0.0.0.0 so a phone/iPad can be the touchscreen and inherits the deck via the file.
+- **Why:** Plain overwrite is last-writer-wins: with two devices, whichever pushed last silently deleted the other's new cards — data loss in exactly the multi-device scenario LAN mode exists for. Union-merge makes card loss impossible; same-card rating conflicts stay last-writer-wins (cheap to redo); a deletion on one device can resurrect from the file in a fresh browser (also cheap to redo). Ranked: losing a card > losing a rating > re-deleting a card.
+- **Implications:** The deck file only grows across devices; a true "purge everywhere" requires deleting data/deck.json too. If real conflict resolution is ever needed, add per-card mtimes — don't reinvent overwrite.
+
 ## 2026-07-11 — Deck-mirror sync: lead time before submit, not timers or submit-instant writes
 - **Decision:** The client-side deck mirror (#deck-words) syncs on ask-box focusin and at the start of the 问老师 message handler — every path that leads to a submit gets the write in with real lead time. The original mount-time retry timers (800/2000ms) and a submit-instant capture-phase sync are both rejected.
 - **Why:** Measured behavior: a value written into a Gradio-bound textarea at submit-instant updates the DOM but loses to Gradio's async store snapshot — the server sees the stale value. Fixed timers race unbounded mount latency. Lead time (focus precedes typing; the 问老师 handler syncs 600ms before its click) is the only shape that reliably wins.

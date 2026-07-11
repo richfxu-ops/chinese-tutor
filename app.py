@@ -19,6 +19,7 @@ import json
 import os
 import random
 import re
+import threading
 
 import gradio as gr
 from llama_cpp import Llama
@@ -37,6 +38,19 @@ if not c.GGUF_FILE.exists():
 # n_gpu_layers=-1 offloads everything to Metal on Apple Silicon. The chat template
 # is read from the GGUF metadata (Qwen2.5 ships a ChatML-style template).
 llm = Llama(model_path=str(c.GGUF_FILE), n_ctx=4096, n_gpu_layers=-1, verbose=False)
+
+# llama-cpp is NOT thread-safe, and Gradio 6 runs each event listener on its own
+# concurrency queue — a card-example request can fire while respond() streams.
+# Every model call goes through this lock; the streaming loop holds it for the
+# whole generation, so other events simply wait their turn.
+_LLM_LOCK = threading.Lock()
+
+
+def generate(messages: list[dict], **kw) -> str:
+    """Serialized non-streaming completion — the one way to call the model."""
+    with _LLM_LOCK:
+        out = llm.create_chat_completion(messages, **kw)
+    return out["choices"][0]["message"]["content"]
 
 # Fallback starter pool, ~4 per task type — used only when gen_starters()
 # below fails. Normally the starters are written by the model at startup,
@@ -105,9 +119,8 @@ def gen_starters() -> list[str]:
         )
         # 600, not 400: six starters + JSON syntax can crest 400 tokens, and a
         # truncated array (no closing ]) fails extraction → needless fallback
-        out = llm.create_chat_completion(
-            [{"role": "user", "content": prompt}], temperature=0.8, max_tokens=600,
-        )["choices"][0]["message"]["content"]
+        out = generate([{"role": "user", "content": prompt}],
+                       temperature=0.8, max_tokens=600)
         arr = extract_json_array(out)
         starters = [s.strip() for s in arr if isinstance(s, str) and s.strip()][:6]
         if len(starters) >= 4:
@@ -1012,9 +1025,8 @@ def disambiguate(texts: list[str]) -> dict[str, tuple[list[str], str]]:
         + "\n\n只返回一个JSON对象，例如 {" + example + "}。不要解释。"
     )
     try:
-        out = llm.create_chat_completion(
-            [{"role": "user", "content": prompt}], temperature=0, max_tokens=220,
-        )["choices"][0]["message"]["content"]
+        out = generate([{"role": "user", "content": prompt}],
+                       temperature=0, max_tokens=220)
         picks = extract_json_object(out)
         overrides = {}
         for w, v in picks.items():
@@ -1070,10 +1082,8 @@ def fill_translations(reply: str) -> dict[int, str]:
         "不要拼音，不要解释。\n\n" + numbered
     )
     try:
-        out = llm.create_chat_completion(
-            [{"role": "user", "content": prompt}],
-            temperature=0, max_tokens=60 * len(missing) + 40,
-        )["choices"][0]["message"]["content"]
+        out = generate([{"role": "user", "content": prompt}],
+                       temperature=0, max_tokens=60 * len(missing) + 40)
         fills = {}
         for line in out.splitlines():
             m = _NUMBERED.match(line)
@@ -1093,9 +1103,8 @@ def translate_user_to_chinese(user_msg: str) -> str:
         "只返回中文翻译，不要拼音，不要解释。\n\n" + user_msg.strip()
     )
     try:
-        out = llm.create_chat_completion(
-            [{"role": "user", "content": prompt}], temperature=0, max_tokens=120,
-        )["choices"][0]["message"]["content"]
+        out = generate([{"role": "user", "content": prompt}],
+                       temperature=0, max_tokens=120)
         line = next((l.strip() for l in out.splitlines() if l.strip()), "")
         line = _UNLABEL.sub("", line).strip().strip('"“”')
         return line[:200] if HAS_CJK.search(line) else ""
@@ -1130,11 +1139,15 @@ def _render_msg(m: dict, tutor: bool) -> str:
     return "<br>".join(parts)
 
 
-def render_chat(raw: list[dict]) -> str:
+def render_chat(raw: list[dict], unclosed: bool = False) -> str:
     """Build the whole transcript as one self-contained HTML block, annotating every
     Chinese span (pinyin ruby + hover gloss). A message's disambiguation
     overrides travel ON the message dict (m["tips"]) so they can never
-    misalign; strip_for_llm() removes them before generation."""
+    misalign; strip_for_llm() removes them before generation.
+
+    unclosed=True omits the closing wrapper tag so the streaming path can
+    append its live bubble — the open/close contract lives HERE, not in
+    string surgery at the call site."""
     bubbles = []
     for i, m in enumerate(raw):
         u = m["role"] == "user"
@@ -1159,7 +1172,8 @@ def render_chat(raw: list[dict]) -> str:
             f'<div class="msg">{msg}</div>{chip}</div>'
         )
     inner = "".join(bubbles) or '<div class="empty">用中文或英文问我… (ask me anything)</div>'
-    return f'<div class="chat">{inner}</div>'
+    out = f'<div class="chat">{inner}'
+    return out if unclosed else out + "</div>"
 
 
 # Target words for conversation mode: the student's own collected flashcard
@@ -1228,7 +1242,7 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
     messages = [{"role": "system", "content": system}] + strip_for_llm(raw)
 
     # history annotated once; the in-progress reply rides in a plain bubble
-    base = render_chat(raw)[: -len("</div>")]
+    base = render_chat(raw, unclosed=True)
 
     def with_stream_bubble(text: str, note: str = "") -> str:
         inner = html.escape(text).replace("\n", "<br>")
@@ -1240,19 +1254,29 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
     reply = ""
     try:
         n = 0
-        for chunk in llm.create_chat_completion(
-            messages, temperature=0.7, max_tokens=512, stream=True,
-        ):
-            delta = chunk["choices"][0]["delta"].get("content")
-            if not delta:
-                continue
-            reply += delta
-            n += 1
-            if n % 8 == 0:
-                yield (with_stream_bubble(reply), raw, "", targets, bar())
-    except Exception:  # noqa: BLE001 — keep whatever streamed before the error
+        with _LLM_LOCK:   # held for the whole generation — see _LLM_LOCK's note
+            for chunk in llm.create_chat_completion(
+                messages, temperature=0.7, max_tokens=512, stream=True,
+            ):
+                delta = chunk["choices"][0]["delta"].get("content")
+                if not delta:
+                    continue
+                reply += delta
+                n += 1
+                if n % 8 == 0:
+                    yield (with_stream_bubble(reply), raw, "", targets, bar())
+    except Exception:  # noqa: BLE001 — a partial reply is kept; total failure below
         pass
-    reply = reply.strip() or "（生成失败，请再试一次 · generation failed — try again）"
+    reply = reply.strip()
+    if not reply:
+        # honest failure: nothing enters history, the typed message goes back in
+        # the box for a retry, and the error bubble is display-only (transient)
+        err = with_stream_bubble(
+            "生成失败了——按发送再试一次。The model errored; press send to retry.",
+            note="出错 error",
+        )
+        yield (err, raw[:-1], user_msg, targets, bar())
+        return
     raw = raw + [{"role": "assistant", "content": reply}]
 
     # reading-layer pass: sense picks, translation fills, prompt translation
@@ -1265,16 +1289,20 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
         fills = fill_translations(reply)
         if fills:
             raw[-1]["fills"] = fills
-    # an English prompt gets its Chinese under the student's own bubble
+    # an English prompt gets its Chinese under the student's own bubble —
+    # keyed to the last NON-EMPTY line (a trailing newline must not detach it)
     if _mostly_ascii(user_msg) and len(user_msg.strip()) >= 8:
         zh = translate_user_to_chinese(user_msg)
         if zh:
-            raw[-2]["fills"] = {user_msg.count("\n"): zh}
+            msg_lines = user_msg.split("\n")
+            idx = max((i for i, l in enumerate(msg_lines) if l.strip()), default=0)
+            raw[-2]["fills"] = {idx: zh}
     yield (render_chat(raw), raw, "", targets, bar())
 
 
 # List markers / labels the model sometimes prefixes to its lines ("1. ", "例句：")
-_UNLABEL = re.compile(r"^\s*(?:\d+[.、)]|[-•*]|例句[:：]?|翻译[:：]?|Translation[:：]?)\s*")
+_UNLABEL = re.compile(
+    r"^\s*(?:\d+[.、)]|[-•*]|第[一二三]行[:：]?|例句[:：]?|释义[:：]?|翻译[:：]?|Translation[:：]?)\s*")
 # A trailing run of English glued onto the example line (我很高兴，I am happy):
 # stripped so the zh TTS never voices it — the translation belongs in example_en.
 _TRAILING_EN = re.compile(r"[，,\s]*[A-Za-z][A-Za-z0-9 ,.'’!?;:-]{7,}[.!?]?\s*$")
@@ -1306,15 +1334,16 @@ def gen_card_example(req_json: str) -> str:
             f"第二行：用“{word}”写一个HSK5水平的简单例句（不要拼音）。\n"
             "第三行：例句的英文翻译。只返回这三行，不要解释。"
         )
-    out = llm.create_chat_completion(
-        [{"role": "user", "content": prompt}], temperature=0.7, max_tokens=160,
-    )["choices"][0]["message"]["content"].strip()
+    out = generate([{"role": "user", "content": prompt}],
+                   temperature=0.7, max_tokens=160).strip()
     lines = [_UNLABEL.sub("", line).strip().strip('"“”')
              for line in out.splitlines() if line.strip()]
-    # the example is the first Chinese line containing the word; the definition
-    # (only asked for when the dictionary had none) is an English line BEFORE
-    # it, the translation an English line AFTER it
-    ex_idx = next((i for i, l in enumerate(lines) if word in l and HAS_CJK.search(l)), None)
+    # the example is the first mostly-CHINESE line containing the word (a
+    # definition line echoing the headword, '很累 — to be very tired', is
+    # mostly ASCII and must not qualify); the definition is an English line
+    # BEFORE it, the translation an English line AFTER it
+    ex_idx = next((i for i, l in enumerate(lines)
+                   if word in l and HAS_CJK.search(l) and not _mostly_ascii(l)), None)
     resp: dict[str, str] = {"id": card_id}
     if ex_idx is not None:
         example = lines[ex_idx][:120]
@@ -1340,14 +1369,31 @@ DECK_FILE = c.ROOT / "data" / "deck.json"
 
 
 def save_deck(deck_json: str) -> None:
+    """Merge the pushed deck into the file: union by card id, incoming wins.
+
+    Never lose cards — with LAN mode two devices push full decks, and a plain
+    overwrite would clobber cards the other device added. File-only cards are
+    kept; for a card both sides know, the pusher's version wins (ratings are
+    last-writer-wins, an acceptable loss). Tradeoff: a card DELETED on one
+    device stays in the file, so a fresh browser can resurrect it — cards are
+    precious here, deletions are cheap to redo."""
     try:
-        if not isinstance(json.loads(deck_json), list):
+        deck = json.loads(deck_json)
+        if not isinstance(deck, list):
             return
     except (json.JSONDecodeError, TypeError):
         return
+    try:
+        existing = json.loads(DECK_FILE.read_text(encoding="utf-8")) if DECK_FILE.exists() else []
+        if isinstance(existing, list):
+            seen = {card.get("id") for card in deck if isinstance(card, dict)}
+            deck += [card for card in existing
+                     if isinstance(card, dict) and card.get("id") not in seen]
+    except (json.JSONDecodeError, OSError):
+        pass                                     # unreadable file — overwrite it
     DECK_FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp = DECK_FILE.with_suffix(".json.tmp")
-    tmp.write_text(deck_json, encoding="utf-8")
+    tmp.write_text(json.dumps(deck, ensure_ascii=False), encoding="utf-8")
     tmp.replace(DECK_FILE)
 
 
@@ -1416,6 +1462,10 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
         clear = gr.Button("清空 · clear", elem_id="clear-btn")
         clear.click(lambda: (render_chat([]), [], "", None, ""), None,
                     [chat_html, raw_state, msg, targets_state, targets_bar])
+        # targets are picked once per conversation, so toggling review mode
+        # resets them — the next message re-picks under the new mode instead
+        # of the checkbox being a silent no-op mid-conversation
+        review_mode.change(lambda: (None, ""), None, [targets_state, targets_bar])
     with gr.Tab("卡片 · flashcards"):
         gr.HTML(flashcards_srcdoc())
     with gr.Tab("词表 · word list"):
