@@ -322,6 +322,14 @@ rt {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.42em; font-
   font-size:.95rem; padding:.35rem .7rem; cursor:pointer; transition:all .15s ease;
 }}
 .starter-chip:hover {{ color:var(--cinnabar); border-color:var(--cinnabar); transform:translateY(-1px); }}
+.starter-refresh {{
+  background:transparent; border:1px solid var(--hairline); border-radius:50%;
+  width:1.7rem; height:1.7rem; padding:0; color:var(--ink-soft);
+  font-size:.95rem; line-height:1; cursor:pointer; transition:all .15s ease;
+}}
+.starter-refresh:hover {{ color:var(--cinnabar); border-color:var(--cinnabar); }}
+.starter-refresh.busy {{ animation:spin 1s linear infinite; opacity:.45; pointer-events:none; }}
+@keyframes spin {{ to {{ transform:rotate(360deg); }} }}
 #clear-btn {{ background:transparent !important; border:1px solid var(--hairline) !important;
              color:var(--ink-soft) !important; border-radius:3px !important;
              font-family:var(--hanzi-kai) !important; }}
@@ -770,16 +778,38 @@ APP_JS = """
     });
   };
 
-  // Starter chips: a fresh random six from the pool on every page load.
+  // Starter chips: a fresh random six from the pool on every page load; the ⟲
+  // button asks the server to write a genuinely new set (fresh random seeds).
   const STARTER_POOL = __STARTERS__;
+  const renderStarters = (row, picks) => {
+    const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    row.innerHTML = '<span class="starters-label">试一试 · try one</span>'
+      + picks.map(p => '<button class="starter-chip">' + esc(p) + '</button>').join('')
+      + '<button class="starter-refresh" title="换一批 · write me a new six">⟲</button>';
+  };
   const ensureStarters = () => {
     const row = document.getElementById('starters');
     if (!row || row.dataset.filled) return;
     row.dataset.filled = '1';
-    const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-    const picks = [...STARTER_POOL].sort(() => Math.random() - 0.5).slice(0, 6);
-    row.innerHTML = '<span class="starters-label">试一试 · try one</span>'
-      + picks.map(p => '<button class="starter-chip">' + esc(p) + '</button>').join('');
+    renderStarters(row, [...STARTER_POOL].sort(() => Math.random() - 0.5).slice(0, 6));
+  };
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.starter-refresh');
+    if (!btn || btn.classList.contains('busy')) return;
+    btn.classList.add('busy');
+    const ta = document.querySelector('#starters-req textarea');
+    if (ta) setNative(ta, String(Date.now()));
+  });
+  let lastStarters = '';
+  const checkStartersRes = () => {
+    const el = document.getElementById('starters-data');
+    const text = el ? el.textContent.trim() : '';
+    if (!text || text === lastStarters) return;
+    lastStarters = text;
+    let picks;
+    try { picks = JSON.parse(text); } catch { return; }
+    const row = document.getElementById('starters');
+    if (Array.isArray(picks) && picks.length && row) renderStarters(row, picks);
   };
   document.addEventListener('click', (e) => {
     const chip = e.target.closest('.starter-chip');
@@ -856,6 +886,7 @@ APP_JS = """
       ensureDeckRestore();
       ensureMic();
       checkCardRes();
+      checkStartersRes();
       const chat = document.querySelector('.chat');
       if (!chat) return;
       if (chat.childElementCount !== lastCount) {
@@ -1504,6 +1535,16 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
                                show_label=False, container=False)
         deck_save.change(save_deck, deck_save, None)
         gr.HTML(deck_restore_html, elem_classes=["hidden-input"])
+        # Starter refresh: the ⟲ button writes a nonce here; a fresh model-written
+        # six lands in #starters-data for the observer to swap in.
+        starters_req = gr.Textbox("", elem_id="starters-req", elem_classes=["hidden-input"],
+                                  show_label=False, container=False)
+        starters_res = gr.HTML("", elem_classes=["hidden-input"])
+        starters_req.change(
+            lambda _nonce: '<div id="starters-data">'
+                           + html.escape(json.dumps(gen_starters(), ensure_ascii=False))
+                           + "</div>",
+            starters_req, starters_res)
         # Starter chips live in plain HTML; APP_JS fills them with a fresh random
         # sample from STARTER_POOL on every page load and wires the clicks.
         gr.HTML('<div class="starters-row" id="starters"></div>')

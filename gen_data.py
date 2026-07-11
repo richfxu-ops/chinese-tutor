@@ -149,11 +149,19 @@ def response_text(resp) -> str:
 
 def extract_json_array(text: str) -> list[dict]:
     """Pull the JSON array out of a teacher response, tolerating stray prose or
-    ```json fences."""
+    ```json fences — and the wrong-closing-bracket typo (…"]} → …"]) that
+    otherwise throws away an entire good array."""
     match = _JSON_ARRAY_RE.search(text)
-    if not match:
-        raise ValueError(f"no JSON array found in response: {text[:200]!r}")
-    return json.loads(match.group(0))
+    if match:
+        return json.loads(match.group(0))
+    start = text.find("[")
+    if start != -1:
+        salvaged = re.sub(r"[}\s]+$", "]", text[start:].rstrip(), count=1)
+        try:
+            return json.loads(salvaged)
+        except json.JSONDecodeError:
+            pass
+    raise ValueError(f"no JSON array found in response: {text[:200]!r}")
 
 
 def to_records(task: c.TaskSpec, items: list[str], pairs: list[dict]) -> list[dict]:

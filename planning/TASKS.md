@@ -72,3 +72,7 @@
 - [x] File-backed deck (data/deck.json mirror + fresh-browser restore) #ship
 - [x] Streaming replies (plain live bubble → 加注中 → annotated swap-in; scroll-follow) #ship
 - [x] 写 stroke-order practice on flashcards (hanzi-writer local lib + get_strokes.py data, quiz overlay) #ship
+- [x] LAN=1 option (phone/iPad as touchscreen) + review-checkbox layout fix #ship
+- [x] Code review round 3 → 8 fixes: model lock (crash-class), honest stream failures, card-fill line selection, live review-mode toggle, deck union-merge, render_chat(unclosed), fill key, DECISIONS entries #quality
+- [x] 聊天 mode Chinese-in/Chinese-out: English prompts translated BEFORE the model sees them; translation-drift stripping on replies #ship
+- [x] Starter chips: validity filter (no "How do I say [中文] in Chinese?"), ⟲ refresh button, JSON-array salvage for wrong-closing-bracket rolls #ship
