@@ -14,6 +14,7 @@ shows the ANNOTATED HTML. That separation is why the state plumbing below exists
 
 from __future__ import annotations
 
+import html
 import os
 
 import gradio as gr
@@ -135,10 +136,11 @@ footer {{ display:none !important; }}
 ruby {{ ruby-position:over; margin:0 .02em; }}
 rt {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.42em; font-weight:500; }}
 .b .msg rt {{ color:var(--cinnabar) !important; }}
-.hz {{ position:relative; border-bottom:1px dotted #b49f88; cursor:help; }}
+.hz {{ position:relative; border-bottom:1px dotted #b49f88; cursor:pointer; }}
 .hz:hover {{ background:#f3e3c9; z-index:5; }}
+.hz:active {{ background:#eed9a8; }}
 .hz:hover::after {{
-  content:attr(data-tip);
+  content:attr(data-tip) "   ·   点击收藏 click to collect";
   /* left-aligned to the word (a centered tooltip clips off-page for words near
      the sheet's left margin) */
   position:absolute; top:calc(100% + 5px); left:-.25rem;
@@ -178,26 +180,90 @@ rt {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.42em; font-
              color:var(--ink-soft) !important; border-radius:3px !important;
              font-family:var(--hanzi-kai) !important; }}
 #clear-btn:hover {{ color:var(--cinnabar) !important; border-color:var(--cinnabar) !important; }}
+
+/* ---------- tabs + flashcards frame ---------- */
+button[role="tab"] {{
+  font-family:"IBM Plex Mono",ui-monospace,monospace !important; font-size:.72rem !important;
+  letter-spacing:.13em; text-transform:uppercase; color:var(--ink-soft) !important;
+  background:transparent !important; border-radius:0 !important;
+}}
+button[role="tab"][aria-selected="true"] {{
+  color:var(--cinnabar) !important; border-bottom:2px solid var(--cinnabar) !important;
+}}
+.cards-frame {{ width:100%; height:760px; border:none; display:block; }}
+
+/* ---------- collect toast ---------- */
+#collect-toast {{
+  position:fixed; right:22px; bottom:22px; z-index:100;
+  background:var(--ink); color:var(--paper);
+  font-family:"EB Garamond",var(--hanzi-kai),serif; font-size:.95rem;
+  padding:.55rem .9rem; border-radius:3px; border-left:3px solid var(--cinnabar);
+  box-shadow:0 4px 16px rgba(38,32,26,.3);
+  opacity:0; transform:translateY(8px); transition:all .25s ease; pointer-events:none;
+}}
+#collect-toast.show {{ opacity:1; transform:translateY(0); }}
 """
 
-# The app is designed light-only (paper). Gradio follows the OS and may add
-# .dark — strip it and pin the light palette (the :root,.dark overrides above
-# are the CSS backstop).
-FORCE_LIGHT_JS = """
-() => {
+# Page JS, run once at load. Injected via launch(head=...) as a self-invoking
+# <script> — Gradio 6.20 ships launch(js=...) into the frontend config but never
+# invokes it (verified empirically), so head= is the reliable hook.
+#  - Light-only: the app is designed as paper; Gradio follows the OS and may add
+#    .dark — strip it and keep it off (the :root,.dark CSS vars are the backstop).
+#  - Click-to-collect: clicking any annotated word saves {word, pinyin, gloss,
+#    example sentence} into the flashcards deck (localStorage, same key/schema as
+#    web/flashcards.html, so the review tab reads the same deck). The transcript
+#    HTML is replaced every turn, so the listener is delegated from document.
+APP_JS = """
+(() => {
   const root = document.documentElement;
   root.classList.remove('dark');
   new MutationObserver(() => root.classList.remove('dark'))
     .observe(root, { attributes: true, attributeFilter: ['class'] });
-}
+
+  const KEY = 'hsk5-tutor-deck-v1';   // shared with web/flashcards.html
+  const loadDeck = () => { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; } };
+  const toast = (msg) => {
+    let t = document.getElementById('collect-toast');
+    if (!t) { t = document.createElement('div'); t.id = 'collect-toast'; document.body.appendChild(t); }
+    t.textContent = msg; t.classList.add('show');
+    clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2000);
+  };
+  const plainText = (el) => {   // textContent with the ruby pinyin stripped
+    const c = el.cloneNode(true);
+    c.querySelectorAll('rt').forEach(r => r.remove());
+    return c.textContent;
+  };
+
+  document.addEventListener('click', (e) => {
+    const hz = e.target.closest('.hz');
+    if (!hz) return;
+    const front = plainText(hz).trim();
+    if (!front) return;
+    const deck = loadDeck();
+    if (deck.some(c => c.front === front)) { toast('“' + front + '” 已在卡片里 · already in your deck'); return; }
+    const tip = hz.dataset.tip || '';
+    const [pinyin, gloss = ''] = tip.split(/ — (.*)/s, 2);
+    // example: the sentence around the word, from the same bubble
+    const msg = hz.closest('.msg');
+    const sentence = msg
+      ? (plainText(msg).match(/[^。！？!?\\n]*[。！？!?]?/g) || []).find(s => s.includes(front)) : '';
+    deck.push({ id: front + ':' + Date.now(), front, pinyin, gloss,
+                example: (sentence || '').trim().slice(0, 120),
+                ease: 2.5, interval: 0, reps: 0, lapses: 0, due: 0 });
+    localStorage.setItem(KEY, JSON.stringify(deck));
+    toast('已收藏 “' + front + '” · added to your deck (' + deck.length + ')');
+  });
+})();
 """
+
+HEAD_HTML = f"<script>{APP_JS}</script>"
 
 HEADER_HTML = """
 <div class="hdr">
   <div class="seal">文</div>
   <div>
     <div class="hdr-title">HSK-5 中文 <em>tutor</em></div>
-    <div class="hdr-sub">bilingual answers · pinyin above every character · <b>hover a word for its meaning</b></div>
+    <div class="hdr-sub">pinyin above every character · <b>hover a word for its meaning · click to collect it</b></div>
   </div>
 </div>
 """
@@ -245,19 +311,30 @@ def respond(user_msg: str, raw: list[dict]):
     return render_chat(raw), raw, ""
 
 
+def flashcards_srcdoc() -> str:
+    """Embed web/flashcards.html as an <iframe srcdoc>. srcdoc iframes are
+    same-origin, so the widget shares the click-to-collect localStorage deck and
+    `storage` events keep it live-synced — no static-file routes needed."""
+    page = (c.ROOT / "web" / "flashcards.html").read_text(encoding="utf-8")
+    return f'<iframe class="cards-frame" title="flashcards" srcdoc="{html.escape(page, quote=True)}"></iframe>'
+
+
 with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
     gr.HTML(HEADER_HTML)
-    chat_html = gr.HTML(render_chat([]))
-    raw_state = gr.State([])
-    msg = gr.Textbox(
-        placeholder="用中文或英文问我… (ask in Chinese or English)",
-        show_label=False, submit_btn=True, elem_id="ask",
-    )
-    gr.Examples(examples=STARTERS, inputs=msg, label="试一试 · try one", elem_id="starters")
+    with gr.Tab("对话 · chat"):
+        chat_html = gr.HTML(render_chat([]))
+        raw_state = gr.State([])
+        msg = gr.Textbox(
+            placeholder="用中文或英文问我… (ask in Chinese or English)",
+            show_label=False, submit_btn=True, elem_id="ask",
+        )
+        gr.Examples(examples=STARTERS, inputs=msg, label="试一试 · try one", elem_id="starters")
 
-    msg.submit(respond, [msg, raw_state], [chat_html, raw_state, msg])
-    clear = gr.Button("清空 · clear", elem_id="clear-btn")
-    clear.click(lambda: (render_chat([]), [], ""), None, [chat_html, raw_state, msg])
+        msg.submit(respond, [msg, raw_state], [chat_html, raw_state, msg])
+        clear = gr.Button("清空 · clear", elem_id="clear-btn")
+        clear.click(lambda: (render_chat([]), [], ""), None, [chat_html, raw_state, msg])
+    with gr.Tab("卡片 · flashcards"):
+        gr.HTML(flashcards_srcdoc())
 
 if __name__ == "__main__":
     # PORT is set by dev tooling when 7860 is taken; default stays 7860.
@@ -266,5 +343,5 @@ if __name__ == "__main__":
         server_port=int(os.environ.get("PORT", "7860")),
         theme=THEME,
         css=PAGE_CSS,
-        js=FORCE_LIGHT_JS,
+        head=HEAD_HTML,
     )
