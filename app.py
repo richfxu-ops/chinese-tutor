@@ -225,6 +225,8 @@ footer {{ display:none !important; }}
 .b.u .who {{ color:var(--ink-soft); text-align:right; }}
 .b .msg {{ font-family:"EB Garamond",var(--hanzi-kai); font-size:1.17rem; line-height:2.55; }}
 .b .msg, .b .msg * {{ color:var(--ink) !important; }}
+/* filled-in translation for a line the model left Chinese-only */
+.b .msg .fill-en {{ color:var(--ink-soft) !important; font-style:italic; font-size:.92em; }}
 ruby {{ ruby-position:over; margin:0 .02em; }}
 rt {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.42em; font-weight:500; }}
 .b .msg rt {{ color:var(--cinnabar) !important; }}
@@ -950,6 +952,73 @@ def disambiguate(texts: list[str]) -> dict[str, tuple[list[str], str]]:
         return {}
 
 
+# --------------------------------------------------------------------------- #
+# Q&A translation fill: the tuned model SOMETIMES skips the English line under
+# a Chinese sentence. Rather than retrain (or bolt on a cloud API), one extra
+# local call translates just the missed lines — only on turns that have any.
+# --------------------------------------------------------------------------- #
+_CJK_COUNT = re.compile(r"[一-鿿]")
+_INLINE_EN = re.compile(r"[A-Za-z][A-Za-z ,.'’!?;:-]{7,}")
+_NUMBERED = re.compile(r"\s*(\d+)[.、)]\s*(.+)")
+
+
+def untranslated_lines(reply: str) -> dict[int, str]:
+    """{line index: Chinese line} for substantial Chinese lines with no inline
+    English and no mostly-English line following them."""
+    lines = reply.split("\n")
+    out: dict[int, str] = {}
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if len(_CJK_COUNT.findall(s)) < 4:      # empty / label / fragment
+            continue
+        if _INLINE_EN.search(s):                # translated inline already
+            continue
+        nxt = next((l.strip() for l in lines[i + 1:] if l.strip()), "")
+        if nxt and _mostly_ascii(nxt):          # translated on the next line
+            continue
+        out[i] = s
+    return out
+
+
+def fill_translations(reply: str) -> dict[int, str]:
+    """One model call → {line index: English} for the reply's missed lines."""
+    missing = untranslated_lines(reply)
+    if not missing:
+        return {}
+    numbered = "\n".join(f"{i}. {s}" for i, s in missing.items())
+    prompt = (
+        "把下面每行中文翻译成英文。保持行号，逐行返回，格式：行号. 英文翻译。"
+        "不要拼音，不要解释。\n\n" + numbered
+    )
+    try:
+        out = llm.create_chat_completion(
+            [{"role": "user", "content": prompt}],
+            temperature=0, max_tokens=60 * len(missing) + 40,
+        )["choices"][0]["message"]["content"]
+        fills = {}
+        for line in out.splitlines():
+            m = _NUMBERED.match(line)
+            if m and int(m.group(1)) in missing and _mostly_ascii(m.group(2)):
+                fills[int(m.group(1))] = m.group(2).strip()[:200]
+        return fills
+    except Exception:  # noqa: BLE001 — a failed fill just leaves the reply as-is
+        return {}
+
+
+def _render_msg(m: dict) -> str:
+    """A message's display HTML: annotated text, plus any filled-in translations
+    inserted (styled as .fill-en) under the lines that were missing them."""
+    ov, fills = m.get("tips"), m.get("fills")
+    if not fills:
+        return _tipped(m["content"], ov)
+    parts = []
+    for i, line in enumerate(m["content"].split("\n")):
+        parts.append(_tipped(line, ov))
+        if i in fills:
+            parts.append(f'<span class="fill-en">{html.escape(fills[i])}</span>')
+    return "<br>".join(parts)
+
+
 def render_chat(raw: list[dict]) -> str:
     """Build the whole transcript as one self-contained HTML block, annotating every
     Chinese span (pinyin ruby + hover gloss). A message's disambiguation
@@ -959,7 +1028,7 @@ def render_chat(raw: list[dict]) -> str:
     for i, m in enumerate(raw):
         u = m["role"] == "user"
         who = "You" if u else "老师 Tutor"
-        msg = _tipped(m["content"], m.get("tips"))
+        msg = _render_msg(m)
         spk = "" if u else (
             f'<button class="spk" title="朗读中文 · read the Chinese aloud"'
             f' data-speak="{html.escape(chinese_only(m["content"]), quote=True)}">🔊</button>'
@@ -1040,6 +1109,10 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
     if ov:
         raw[-2]["tips"] = ov
         raw[-1]["tips"] = ov
+    if not conversational:   # 聊天 mode is Chinese-only by design
+        fills = fill_translations(reply)
+        if fills:
+            raw[-1]["fills"] = fills
     return (render_chat(raw), raw, "", targets,
             render_targets(targets if conversational else None))
 
