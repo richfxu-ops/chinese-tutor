@@ -216,14 +216,15 @@ rt {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.42em; font-
 #ask textarea:focus {{ border-color:var(--cinnabar) !important;
                       box-shadow:0 0 0 3px rgba(179,48,42,.14) !important; }}
 #ask .submit-button {{ background:var(--cinnabar) !important; color:var(--sheet) !important;
-                      border:none !important; border-radius:3px !important; }}
+                      border:none !important; border-radius:3px !important;
+                      align-self:center !important; margin-right:3px !important; }}
 #ask .submit-button:hover {{ background:var(--cinnabar-deep) !important; }}
 /* voice input: injected by APP_JS only when SpeechRecognition exists */
-#ask {{ position:relative; }}
+#ask, #ask .input-container {{ position:relative; }}
 #ask textarea {{ padding-right:5.6rem !important; }}
 .mic-btn {{
-  /* mirrors the submit button's inset (10px bottom) with an 8px gap to its left */
-  position:absolute; right:50px; bottom:10px; z-index:5;
+  /* vertically centered in the input bar, an 8px gap left of the send button */
+  position:absolute; right:41px; top:50%; transform:translateY(-50%); z-index:5;
   width:30px; height:30px; display:grid; place-items:center; padding:0;
   background:var(--sheet); border:1px solid var(--hairline); border-radius:3px;
   color:var(--ink-soft); cursor:pointer; transition:all .15s ease;
@@ -501,7 +502,9 @@ APP_JS = """
   };
   const ensureMic = () => {
     if (!SR) return;
-    const box = document.querySelector('#ask');
+    // anchor inside the input bar itself (the submit button's container) so
+    // top:50% centers against the bar, not the padded outer block
+    const box = document.querySelector('#ask .input-container') || document.querySelector('#ask');
     if (!box || box.querySelector('.mic-btn')) return;
     const btn = document.createElement('button');
     btn.className = 'mic-btn'; btn.type = 'button';
