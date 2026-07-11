@@ -193,6 +193,14 @@ rt {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.42em; font-
   font-size:.85rem; line-height:1.5; padding:.4rem .65rem; border-radius:3px;
   box-shadow:0 3px 12px rgba(38,32,26,.3); pointer-events:none; z-index:20;
 }}
+.fix-collect {{
+  margin-top:.45rem; background:transparent; border:1px dotted var(--cinnabar);
+  border-radius:2px; color:var(--cinnabar); cursor:pointer;
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.66rem;
+  letter-spacing:.08em; padding:.28rem .6rem; transition:all .15s ease;
+}}
+.fix-collect:hover {{ background:var(--wash); border-style:solid; }}
+.fix-collect.saved {{ border:1px solid #2f6e5d; color:#2f6e5d; cursor:default; background:transparent; }}
 .empty {{ color:var(--ink-soft); text-align:center; padding:2rem 1rem 2.6rem;
          font-family:var(--hanzi-kai); font-size:1.05rem; }}
 .empty::before {{ content:"学"; display:block; font-family:var(--hanzi-serif);
@@ -277,6 +285,8 @@ button[role="tab"][aria-selected="true"] {{
                font-size:.98rem; color:var(--ink); vertical-align:top; }}
 .wl-table tr:last-child td {{ border-bottom:none; }}
 .wl-table td.hanzi {{ font-family:var(--hanzi-kai); font-size:1.2rem; white-space:nowrap; }}
+.wl-table td.hanzi.sent {{ font-size:1rem; white-space:normal; }}
+.wl-table td.fixto {{ font-family:var(--hanzi-kai); color:#2f6e5d; }}
 .wl-table td.py {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.82rem;
                   color:var(--cinnabar); white-space:nowrap; }}
 .wl-table td.ex {{ color:var(--ink-soft); font-size:.9rem; }}
@@ -353,6 +363,29 @@ APP_JS = """
     syncDeckWords();
   });
 
+  // Correction cards: the server tags correctable tutor bubbles with a
+  // .fix-collect chip; saving stores a kind:'fix' card (front = the student's
+  // wrong sentence, back = the fix + rule) in the same deck/scheduler.
+  document.addEventListener('click', (e) => {
+    const chip = e.target.closest('.fix-collect');
+    if (!chip) return;
+    const { wrong, fix, why } = chip.dataset;
+    if (!wrong || !fix) return;
+    const deck = loadDeck();
+    if (deck.some(c => c.kind === 'fix' && c.front === wrong && c.fix === fix)) {
+      toast('这条纠错已经在卡片里 · correction already saved');
+      chip.classList.add('saved');
+      return;
+    }
+    deck.push({ id: 'fix:' + Date.now(), kind: 'fix', front: wrong, fix, why: why || '',
+                ease: 2.5, interval: 0, reps: 0, lapses: 0, due: 0 });
+    localStorage.setItem(KEY, JSON.stringify(deck));
+    toast('已收藏纠错 · correction saved (' + deck.length + ')');
+    chip.classList.add('saved');
+    chip.textContent = '✓ 已收藏 · saved';
+    renderWordlist();
+  });
+
   // ---- word-list tab: table of the collected deck, with per-row removal.
   // Re-rendered whenever the deck changes: after a collect (above), after a
   // removal (below), and on `storage` events from the flashcards iframe
@@ -368,14 +401,21 @@ APP_JS = """
         'Nothing collected yet — click any word in the chat to add it.</div>';
       return;
     }
-    const rows = [...deck].reverse().map(c =>
-      '<tr><td class="hanzi">' + escHtml(c.front) + '</td>'
-      + '<td class="py">' + escHtml(c.pinyin || '') + '</td>'
-      + '<td>' + escHtml(c.gloss || '') + '</td>'
-      + '<td class="ex">' + escHtml(c.example || '') + '</td>'
-      + '<td class="st">' + (c.reps > 0 ? c.reps + '×' : 'new') + '</td>'
-      + '<td><button class="wl-remove" title="移除 · remove" data-fid="'
-      + escHtml(c.id) + '">✕</button></td></tr>').join('');
+    const rows = [...deck].reverse().map(c => {
+      const cells = c.kind === 'fix'
+        ? '<td class="hanzi sent">' + escHtml(c.front) + '</td>'
+          + '<td class="py">改错</td>'
+          + '<td class="fixto">' + escHtml(c.fix || '') + '</td>'
+          + '<td class="ex">' + escHtml(c.why || '') + '</td>'
+        : '<td class="hanzi">' + escHtml(c.front) + '</td>'
+          + '<td class="py">' + escHtml(c.pinyin || '') + '</td>'
+          + '<td>' + escHtml(c.gloss || '') + '</td>'
+          + '<td class="ex">' + escHtml(c.example || '') + '</td>';
+      return '<tr>' + cells
+        + '<td class="st">' + (c.reps > 0 ? c.reps + '×' : 'new') + '</td>'
+        + '<td><button class="wl-remove" title="移除 · remove" data-fid="'
+        + escHtml(c.id) + '">✕</button></td></tr>';
+    }).join('');
     el.innerHTML =
       '<div class="wl-head">生词表 · collected words <b>' + deck.length + '</b></div>'
       + '<table class="wl-table"><thead><tr><th>词</th><th>拼音</th><th>释义</th>'
@@ -399,6 +439,7 @@ APP_JS = """
     if (!ta) return;
     const now = Date.now();
     const fronts = [...loadDeck()]
+      .filter(c => c.kind !== 'fix')   // correction fronts are sentences, not target words
       .sort((a, b) => (a.due <= now ? 0 : 1) - (b.due <= now ? 0 : 1))
       .map(c => c.front).slice(0, 30);
     Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')
@@ -545,11 +586,52 @@ def chinese_only(text: str) -> str:
     return " ".join("".join(_CJK_CHUNK.findall(line)) for line in lines)
 
 
+# A tutor correction: 应该说“正确的句子”，因为解释… (the trained shape) or
+# 解释…，所以要说“正确的句子”。 The corrected sentence is the quoted group; the
+# explanation is the rest of the sentence around the match (either side), plus
+# the following sentence when it's the (mostly-ASCII) English rule. The (?<!不)
+# guard skips 不要说“错的” so we never capture the wrong version as the fix.
+_FIX_RE = re.compile(r"(?<!不)(?:应该|要)\s*说\s*[“\"]([^”\"]+)[”\"]")
+_SENT_END = re.compile(r"[。！？!?.]")
+
+
+def _mostly_ascii(s: str) -> bool:
+    letters = [ch for ch in s if not ch.isspace()]
+    return bool(letters) and sum(ch.isascii() for ch in letters) / len(letters) > 0.6
+
+
+def extract_correction(reply: str) -> tuple[str, str] | None:
+    """(corrected sentence, explanation) if the reply contains a correction."""
+    m = _FIX_RE.search(reply)
+    if not m:
+        return None
+    ends = [e.end() for e in _SENT_END.finditer(reply, 0, m.start())]
+    sent_start = ends[-1] if ends else 0
+    end_m = _SENT_END.search(reply, m.end())
+    sent_end = end_m.start() if end_m else len(reply)
+    pre = reply[sent_start:m.start()].strip().strip("，、： ")
+    if len(pre) <= 3:   # a bare subject ("你"/"这里"), not an explanation
+        pre = ""
+    post = reply[m.end():sent_end].strip().strip("，、： ")
+    why = "，".join(p for p in (pre, post) if p)
+    for tail in ("，所以要", "，所以", "所以要", "所以"):   # leftovers of "…，所以要说“X”"
+        if why.endswith(tail):
+            why = why[: -len(tail)]
+            break
+    if end_m:  # append the English rule when the next sentence is mostly ASCII
+        rest = reply[end_m.end():]
+        nxt_end = _SENT_END.search(rest)
+        nxt = (rest[: nxt_end.start()] if nxt_end else rest).strip()
+        if _mostly_ascii(nxt):
+            why = f"{why}。{nxt}" if why else nxt
+    return m.group(1), why[:200]
+
+
 def render_chat(raw: list[dict]) -> str:
     """Build the whole transcript as one self-contained HTML block, annotating every
     Chinese span (pinyin ruby + hover gloss)."""
     bubbles = []
-    for m in raw:
+    for i, m in enumerate(raw):
         u = m["role"] == "user"
         who = "You" if u else "老师 Tutor"
         # annotate() emits native `title` tooltips (right for the standalone docs/
@@ -561,9 +643,23 @@ def render_chat(raw: list[dict]) -> str:
             f'<button class="spk" title="朗读中文 · read the Chinese aloud"'
             f' data-speak="{html.escape(chinese_only(m["content"]), quote=True)}">🔊</button>'
         )
+        # When the tutor corrected the previous student turn, offer to save the
+        # correction as a flashcard (front: the student's sentence, back: the
+        # fix + rule). APP_JS handles the click; the data- attrs carry the card.
+        chip = ""
+        if not u and i and raw[i - 1]["role"] == "user":
+            fix = extract_correction(m["content"])
+            if fix:
+                chip = (
+                    f'<button class="fix-collect"'
+                    f' data-wrong="{html.escape(raw[i - 1]["content"].strip()[:160], quote=True)}"'
+                    f' data-fix="{html.escape(fix[0], quote=True)}"'
+                    f' data-why="{html.escape(fix[1], quote=True)}">'
+                    f'✚ 收藏纠错 · save correction</button>'
+                )
         bubbles.append(
             f'<div class="b {"u" if u else "t"}"><div class="who">{who}{spk}</div>'
-            f'<div class="msg">{msg}</div></div>'
+            f'<div class="msg">{msg}</div>{chip}</div>'
         )
     inner = "".join(bubbles) or '<div class="empty">用中文或英文问我… (ask me anything)</div>'
     return f'<div class="chat">{inner}</div>'

@@ -52,3 +52,4 @@
 - [x] Generate 100 multi-turn conversations (2 smoke iterations: closed-world corrections fix) → 900/100 jsonl #data
 - [x] Retrain v2 on Colab A100 (114 steps; T4 attempts hit stale-data + eval-OOM, both fixed) → merge → GGUF → swapped into outputs/, v1 kept as rollback #train
 - [x] Verified v2 weights live: drives conversation, pushes past lazy answers, corrects planted 见面她 error, weaves target words; Q&A bilingual format intact #train
+- [x] Correction flashcards: tutor corrections get a save chip → kind:'fix' cards (wrong sentence → fix + rule) in the deck, review widget, word list, Anki export #ship

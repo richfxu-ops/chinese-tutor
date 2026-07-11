@@ -34,6 +34,9 @@
   /* card */
   .card{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:2.4rem 1.6rem;text-align:center;min-height:15rem;display:flex;flex-direction:column;justify-content:center;gap:.6rem;box-shadow:0 1px 3px rgba(60,48,30,.08)}
   .front{font-family:var(--sans);font-size:3.4rem;font-weight:500;line-height:1.1}
+  .front.sent{font-size:1.5rem;line-height:1.7}  /* correction cards: the front is a sentence */
+  .fixline{font-family:var(--sans);font-size:1.5rem;line-height:1.7;color:var(--jade)}
+  .badge{display:inline-block;font-family:var(--mono);font-size:.62rem;letter-spacing:.1em;color:var(--seal);border:1px solid var(--seal);border-radius:3px;padding:.05rem .4rem;vertical-align:middle;margin-bottom:.4rem}
   .pinyin{font-family:var(--mono);font-size:1.15rem;color:var(--seal);letter-spacing:.02em}
   .gloss{font-size:1.15rem}
   .example{margin-top:.5rem;padding-top:.8rem;border-top:1px solid var(--line);color:var(--muted);font-size:1.05rem;line-height:1.9}
@@ -144,7 +147,7 @@ function speak(text){
   u.lang = "zh-CN"; u.rate = 0.9; if(zhVoice) u.voice = zhVoice;
   speechSynthesis.speak(u);
 }
-function maybeAutoSpeak(c){ if(autoplay && c && c.id !== lastSpokenId){ lastSpokenId = c.id; speak(c.front); } }
+function maybeAutoSpeak(c){ if(autoplay && c && c.kind !== "fix" && c.id !== lastSpokenId){ lastSpokenId = c.id; speak(c.front); } }  // don't voice a wrong sentence
 function toggleAutoplay(){ autoplay = !autoplay; localStorage.setItem("hsk5-autoplay", autoplay?"1":"0"); renderAutoBtn(); if(autoplay && current) speak(current.front); }
 function renderAutoBtn(){ const b = document.getElementById("autobtn"); if(b) b.textContent = "🔊 Auto-play: " + (autoplay ? "on" : "off"); }
 
@@ -199,6 +202,13 @@ function render(){
 }
 
 function frontView(c){
+  if (c.kind === "fix")
+    return `<div class="card">
+        <div><span class="badge">改错 · fix it</span></div>
+        <div class="front sent">${esc(c.front)}</div>
+        <div class="hint">how should this be said?</div>
+      </div>
+      <button class="show-btn" onclick="reveal()">Show answer <span class="kbd">space</span></button>`;
   return `<div class="card">
       <div class="front">${esc(c.front)} <button class="spk" onclick="speak(current.front)" title="Play (p)">🔊</button></div>
       <div class="hint">what does it mean?</div>
@@ -206,6 +216,16 @@ function frontView(c){
     <button class="show-btn" onclick="reveal()">Show answer <span class="kbd">space</span></button>`;
 }
 function backView(c){
+  if (c.kind === "fix")
+    return `<div class="card">
+        <div><span class="badge">改错 · fix it</span></div>
+        <div class="front sent">${esc(c.front)}</div>
+        <div class="fixline">✓ ${esc(c.fix)} <button class="spk sm" onclick="speak(current.fix)" title="Play (p)">🔊</button></div>
+        ${c.why ? `<div class="example">${esc(c.why)}</div>` : ``}
+      </div>
+      <div class="btns">
+        ${rateBtn("again","Again",c)}${rateBtn("hard","Hard",c)}${rateBtn("good","Good",c)}${rateBtn("easy","Easy",c)}
+      </div>`;
   return `<div class="card">
       <div class="front">${esc(c.front)} <button class="spk" onclick="speak(current.front)" title="Play (p)">🔊</button></div>
       <div class="pinyin">${esc(c.pinyin)}</div>
@@ -245,7 +265,9 @@ function addFromForm(){
   toast("Added " + front); render();
 }
 function exportTSV(){
-  const rows = deck.map(c => `${c.front}\t${[c.pinyin, c.gloss].filter(Boolean).join(" · ")}${c.example ? "<br>"+c.example : ""}`);
+  const rows = deck.map(c => c.kind === "fix"
+    ? `${c.front}\t✓ ${c.fix}${c.why ? "<br>"+c.why : ""}`
+    : `${c.front}\t${[c.pinyin, c.gloss].filter(Boolean).join(" · ")}${c.example ? "<br>"+c.example : ""}`);
   download("hsk5-flashcards.tsv", rows.join("\n"));
   toast("Exported " + deck.length + " cards — import into Anki (Front / Back)");
 }
