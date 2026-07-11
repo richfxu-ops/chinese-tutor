@@ -2,6 +2,11 @@
 
 > Dated log of notable choices and *why*, so rationale isn't lost. Newest first.
 
+## 2026-07-10 — Vocab collection: client-side localStorage + iframe-srcdoc flashcards tab
+- **Decision:** Click-to-collect stores cards entirely client-side (localStorage, key `hsk5-tutor-deck-v1`, the schema web/flashcards.html already used). The flashcards widget is embedded as a Gradio tab via `<iframe srcdoc>` (same-origin → shared deck; `storage` events give live cross-tab sync). No server state, no static-file routes.
+- **Why:** The word's pinyin + gloss are already in the DOM (reading-layer attributes), so collection needs zero backend. srcdoc embedding reuses the existing verified widget as-is and it keeps working standalone. Caveat accepted: the deck lives per browser origin (host:port) — fine for a single-user local app on a stable port.
+- **Implications:** launch(js=...) is a no-op in Gradio 6.20 (config carries it, nothing calls it) — page JS must go through launch(head=) as a self-invoking script. Flashcards widget is now light-only paper style to match the app (dark variant removed).
+
 ## 2026-07-10 — App UI: "teacher's red ink" paper aesthetic, light-only
 - **Decision:** Redesigned the Gradio app around a scholarly rice-paper look — ink typography (EB Garamond + Songti/Kaiti), one cinnabar-red accent (pinyin, seal, user wash — the teacher's 朱批 red), transcript as a red-margined manuscript sheet. The app is **light-only**: a JS hook strips Gradio's `.dark` class (with CSS var overrides as backstop) since paper-on-dark was the original readability bug's root cause.
 - **Why:** User found the default Gradio look ugly; the paper/ink direction extends the aesthetic the docs/ pages and reading layer already had. One palette to maintain instead of two.

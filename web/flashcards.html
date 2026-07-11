@@ -4,22 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HSK-5 Flashcards</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital@0;1&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
+  /* "teacher's red ink" paper palette — matches app.py's PAGE_CSS. Light-only
+     by design (see planning/DECISIONS.md 2026-07-10); fonts degrade to system
+     serifs when offline. */
   :root{
-    --ground:#f4f2ec; --surface:#fff; --surface-2:#faf8f3; --ink:#211c19;
-    --muted:#6d645b; --faint:#9a9086; --line:#e4ded3;
+    --ground:#f6f0e3; --surface:#fdfaf2; --surface-2:#f9f4e8; --ink:#26201a;
+    --muted:#7a6d5c; --faint:#a3957f; --line:#d9cdb6;
     --seal:#b3302a; --jade:#2f6e5d; --gold:#9c7a2e; --blue:#2f6e9e;
-    --seal-wash:#f6e9e6; --jade-wash:#e7f0ec;
-    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Songti SC",Georgia,serif;
-    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
-    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --seal-wash:#f7e9e2; --jade-wash:#e7f0ec;
+    --serif:"EB Garamond","Songti SC","Iowan Old Style",Palatino,Georgia,serif;
+    --sans:"EB Garamond","Kaiti SC","STKaiti","PingFang SC",serif;
+    --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
   }
-  @media (prefers-color-scheme:dark){:root{
-    --ground:#16130f; --surface:#1f1b16; --surface-2:#241f19; --ink:#ece5da;
-    --muted:#a99f92; --faint:#766d61; --line:#322b23;
-    --seal:#dd6055; --jade:#6cb69f; --gold:#d0a752; --blue:#6fa8d0;
-    --seal-wash:#2b1a17; --jade-wash:#16241f;
-  }}
   *{box-sizing:border-box}
   body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased}
   .wrap{max-width:38rem;margin:0 auto;padding:clamp(1.2rem,4vw,2.4rem) clamp(1rem,4vw,1.6rem) 3rem}
@@ -33,7 +32,7 @@
   .chip.due b{color:var(--seal)}
 
   /* card */
-  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:2.4rem 1.6rem;text-align:center;min-height:15rem;display:flex;flex-direction:column;justify-content:center;gap:.6rem}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:2.4rem 1.6rem;text-align:center;min-height:15rem;display:flex;flex-direction:column;justify-content:center;gap:.6rem;box-shadow:0 1px 3px rgba(60,48,30,.08)}
   .front{font-family:var(--sans);font-size:3.4rem;font-weight:500;line-height:1.1}
   .pinyin{font-family:var(--mono);font-size:1.15rem;color:var(--seal);letter-spacing:.02em}
   .gloss{font-size:1.15rem}
@@ -41,7 +40,7 @@
   .hint{font-family:var(--mono);font-size:.72rem;color:var(--faint);margin-top:.4rem}
 
   .btns{display:flex;gap:.5rem;margin-top:1rem}
-  button{font-family:var(--sans);font-size:.92rem;font-weight:550;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:.6rem .8rem;transition:transform .08s,border-color .15s}
+  button{font-family:var(--sans);font-size:.92rem;font-weight:550;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:3px;padding:.6rem .8rem;transition:transform .08s,border-color .15s}
   button:hover{transform:translateY(-1px)}
   button:active{transform:translateY(0)}
   .show-btn{width:100%;padding:.8rem;font-size:1rem;background:var(--ink);color:var(--ground);border-color:var(--ink)}
@@ -293,6 +292,16 @@ function relTime(ms){
 let toastT;
 function toast(msg){ const t = document.getElementById("toast"); t.textContent = msg; t.classList.add("show");
   clearTimeout(toastT); toastT = setTimeout(()=>t.classList.remove("show"), 1800); }
+
+// Live-sync with the chat tab: click-to-collect (the parent page — this file is
+// embedded there as a same-origin iframe) writes to the same localStorage key,
+// and `storage` events fire across browsing contexts, not within one.
+window.addEventListener("storage", (e) => {
+  if (e.key !== KEY) return;
+  deck = load();
+  if (current) refreshStats();          // don't yank the card mid-review
+  else { revealed = false; render(); }
+});
 
 renderAutoBtn();
 render();
