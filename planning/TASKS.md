@@ -42,3 +42,4 @@
 - [x] docs/ reference pages (how-llms-work, training-run) + long-explanation pref #infra
 - [x] RUN: python app.py locally + verify the demo end-to-end #ship #run
 - [x] Fix reading layer in Gradio: dark-mode-safe colors + CSS hover gloss (verified in-browser) #ship #M3
+- [x] Redesign app UI: "teacher's red ink" paper aesthetic (theme + launch css, light-only) #ship #M3

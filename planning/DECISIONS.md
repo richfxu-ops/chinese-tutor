@@ -2,6 +2,11 @@
 
 > Dated log of notable choices and *why*, so rationale isn't lost. Newest first.
 
+## 2026-07-10 — App UI: "teacher's red ink" paper aesthetic, light-only
+- **Decision:** Redesigned the Gradio app around a scholarly rice-paper look — ink typography (EB Garamond + Songti/Kaiti), one cinnabar-red accent (pinyin, seal, user wash — the teacher's 朱批 red), transcript as a red-margined manuscript sheet. The app is **light-only**: a JS hook strips Gradio's `.dark` class (with CSS var overrides as backstop) since paper-on-dark was the original readability bug's root cause.
+- **Why:** User found the default Gradio look ugly; the paper/ink direction extends the aesthetic the docs/ pages and reading layer already had. One palette to maintain instead of two.
+- **Implications:** All styling lives in `PAGE_CSS`/`THEME` in app.py, passed to `launch(css=, theme=, js=)` (Gradio 6 moved these off `Blocks()`). Chinese fonts are macOS system fonts (Songti/Kaiti SC) with Noto Serif SC fallback — fine for a local demo. `gradio-app`'s inline dark background is pinned to paper by CSS.
+
 ## 2026-07-10 — Untranslated framing lines: inference-only prompt nudge (no retrain)
 - **Decision:** The tuned model translated only example sentences, leaving greetings/closers/usage notes Chinese-only. Fix chosen: a serve-time-only `SYSTEM_PROMPT_APP` in config.py (adds one line demanding English for *every* Chinese sentence); `app.py` uses it, `gen_data.py` keeps the original `SYSTEM_PROMPT`.
 - **Why:** The behavior is trained-in — the teacher data has the same pattern because the per-task instructions only required translations "per example sentence". A retrain is overkill for a cosmetic gap; the nudge is free and reversible. Tested live: usage notes and closers now get translated (occasionally a 2–4-word greeting like 好，我们来看看 stays Chinese-only — acceptable, decodable via the reading layer).
