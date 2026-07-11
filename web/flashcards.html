@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HSK-5 Flashcards</title>
+<script src="/gradio_api/file=web/vendor/hanzi-writer.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital@0;1&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -77,6 +78,14 @@
   .addform input{grid-column:span 1;font-family:var(--sans);font-size:.9rem;padding:.5rem .6rem;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink)}
   .addform input.wide{grid-column:1 / -1}
   .addform button{grid-column:1 / -1;background:var(--jade);color:#fff;border-color:var(--jade)}
+  /* 写 practice overlay */
+  #writer-overlay{position:fixed;inset:0;background:rgba(38,32,26,.45);display:flex;align-items:center;justify-content:center;z-index:50}
+  #writer-overlay[hidden]{display:none}
+  .wcard{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:1.4rem 1.6rem;text-align:center;box-shadow:0 12px 40px rgba(38,32,26,.35)}
+  .wtitle{font-family:var(--sans);font-size:1.15rem;margin-bottom:.7rem}
+  #writer-target{width:220px;height:220px;margin:0 auto;border:1px dashed var(--line);border-radius:4px;background:var(--surface-2)}
+  .whint{font-family:var(--mono);font-size:.62rem;color:var(--faint);margin-top:.6rem;letter-spacing:.05em}
+  .wclose{margin-top:.8rem;font-size:.85rem;padding:.4rem .9rem}
   .toast{position:fixed;bottom:1rem;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--ground);padding:.5rem .9rem;border-radius:8px;font-size:.85rem;opacity:0;transition:opacity .2s;pointer-events:none}
   .toast.show{opacity:1}
   .kbd{font-family:var(--mono);font-size:.62rem;border:1px solid var(--line);border-radius:3px;padding:0 .25rem;color:var(--faint)}
@@ -115,6 +124,15 @@
   </details>
 </div>
 <div class="toast" id="toast"></div>
+
+<div id="writer-overlay" hidden>
+  <div class="wcard">
+    <div id="w-title" class="wtitle"></div>
+    <div id="writer-target"></div>
+    <div class="whint">照笔顺写 · trace the strokes (a hint appears after 3 misses)</div>
+    <button class="wclose" onclick="closeWriter()">关闭 · close</button>
+  </div>
+</div>
 
 <script>
 "use strict";
@@ -226,8 +244,12 @@ function frontView(c){
 }
 function backView(c){
   const editBtn = `<button class="editbtn" onclick="editCard()" title="编辑 · edit this card">✎</button>`;
+  const writeBtn = (c.kind !== "fix" && typeof HanziWriter !== "undefined")
+    ? ` <button class="askbtn" onclick="practiceWriting()"
+         title="照笔顺写这个词 · trace the strokes">写 · practice writing</button>`
+    : "";
   const askRow = `<div class="askrow"><button class="askbtn" onclick="askTutor()"
-      title="在对话里问老师 · sends the question in the chat tab">问老师 · ask the tutor</button></div>`;
+      title="在对话里问老师 · sends the question in the chat tab">问老师 · ask the tutor</button>${writeBtn}</div>`;
   if (c.kind === "fix")
     return `<div class="card">
         <div><span class="badge">改错 · fix it</span>${editBtn}</div>
@@ -348,6 +370,44 @@ function resetDeck(){
     revealed=false; render();
   }
 }
+
+// ---- 写 practice: hanzi-writer stroke-order quiz, one char at a time ------
+// Lib + per-char data served locally (web/vendor + data/strokes via
+// get_strokes.py); the button only renders when the lib loaded.
+let wChars = [], wIdx = 0;
+function practiceWriting(){
+  if(!current || typeof HanziWriter === "undefined") return;
+  wChars = [...current.front].filter(ch => /[一-鿿]/.test(ch));
+  if(!wChars.length) return;
+  wIdx = 0;
+  document.getElementById("writer-overlay").hidden = false;
+  writerChar();
+}
+function writerChar(){
+  const ch = wChars[wIdx];
+  document.getElementById("w-title").textContent =
+    current.front + " · " + (wIdx + 1) + "/" + wChars.length + " · " + ch;
+  const target = document.getElementById("writer-target");
+  target.innerHTML = "";
+  const writer = HanziWriter.create(target, ch, {
+    width: 220, height: 220, padding: 10,
+    showCharacter: false, showOutline: false, showHintAfterMisses: 3,
+    strokeColor: "#26201a", drawingColor: "#b3302a", outlineColor: "#d9cdb6",
+    highlightColor: "#2f6e5d", drawingWidth: 14,
+    charDataLoader: (c2, done) =>
+      fetch("/gradio_api/file=data/strokes/" + encodeURIComponent(c2) + ".json")
+        .then(r => { if(!r.ok) throw new Error(r.status); return r.json(); })
+        .then(done)
+        .catch(() => { toast("没有“" + c2 + "”的笔顺数据 · no stroke data"); nextWriterChar(); }),
+  });
+  writer.quiz({ onComplete: () => setTimeout(nextWriterChar, 700) });
+}
+function nextWriterChar(){
+  wIdx++;
+  if(wIdx >= wChars.length){ toast("写完了！🎉 all strokes done"); closeWriter(); return; }
+  writerChar();
+}
+function closeWriter(){ document.getElementById("writer-overlay").hidden = true; }
 
 // ---- keyboard ------------------------------------------------------------
 document.addEventListener("keydown", e => {

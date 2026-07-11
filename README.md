@@ -47,8 +47,11 @@ Open [`train_colab.ipynb`](train_colab.ipynb) in Colab (set runtime to a GPU), u
 ### 3. Run the demo (local, Apple Silicon)
 ```bash
 python get_cedict.py             # once: fetch CC-CEDICT for hover glosses
+python get_strokes.py            # once: fetch stroke data for 写 practice (~46MB)
 python app.py                    # serves the GGUF at http://localhost:7860
 ```
+
+Or double-click `start-tutor.command` (launches and opens the browser for you).
 
 ## Before / after
 

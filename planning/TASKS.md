@@ -67,3 +67,8 @@
 - [x] Q&A translation fill: Chinese lines the model left untranslated get a local translate pass (one extra call only when gaps exist); fills stored on the message, never fed back to the model; styled identically to authored text #ship
 - [x] English prompts get their Chinese under the student's bubble — annotated (ruby + glosses + collectible), both modes #ship
 - [x] Word list → click a word to open its card (back view) in the flashcards tab; parent→iframe show-card message, retried for lazy tab mounts #ship
+- [x] start-tutor.command launcher + Desktop app bundle with 文 seal icon #ship
+- [x] Review-through-conversation (复习模式 checkbox: targets = due cards only) + per-line TTS in chat #ship
+- [x] File-backed deck (data/deck.json mirror + fresh-browser restore) #ship
+- [x] Streaming replies (plain live bubble → 加注中 → annotated swap-in; scroll-follow) #ship
+- [x] 写 stroke-order practice on flashcards (hanzi-writer local lib + get_strokes.py data, quiz overlay) #ship

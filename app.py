@@ -1419,6 +1419,10 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
         gr.HTML('<div id="wordlist"></div>')
 
 if __name__ == "__main__":
+    # Static files for the flashcards' 写 practice mode: the hanzi-writer lib
+    # and its per-character stroke data (data/strokes/, via get_strokes.py),
+    # served at /gradio_api/file=<path>. Everything stays local/offline.
+    gr.set_static_paths(paths=[c.ROOT / "web" / "vendor", c.ROOT / "data" / "strokes"])
     # PORT is set by dev tooling when 7860 is taken; default stays 7860.
     # Gradio 6 takes theme/css/js at launch() (not Blocks()).
     demo.launch(
