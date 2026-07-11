@@ -24,7 +24,7 @@ import gradio as gr
 from llama_cpp import Llama
 
 import config as c
-from annotate import annotate
+from annotate import ambiguous_words, annotate, sense_options
 
 if not c.GGUF_FILE.exists():
     raise SystemExit(
@@ -700,9 +700,63 @@ def extract_correction(reply: str) -> tuple[str, str] | None:
     return m.group(1), why[:200]
 
 
-def render_chat(raw: list[dict]) -> str:
+# --------------------------------------------------------------------------- #
+# In-context sense disambiguation (地道: tunnel or authentic?). One extra short
+# generation per turn, only when the new messages contain ambiguous words. The
+# result feeds annotate() overrides, so tooltip AND ruby pinyin reflect the
+# sense actually used. Failures fall back silently to the dictionary tips.
+# --------------------------------------------------------------------------- #
+_SENTENCE_SPLIT = re.compile(r"[。！？!?\n]")
+
+
+def _sentence_around(text: str, word: str) -> str:
+    for chunk in _SENTENCE_SPLIT.split(text):
+        if word in chunk:
+            return chunk.strip()[:80]
+    return text.strip()[:80]
+
+
+def disambiguate(texts: list[str]) -> dict[str, tuple[list[str], str]]:
+    """One model call → {word: (syllables, gloss)} for the ambiguous words in
+    `texts`, choosing the sense each word carries in its own sentence."""
+    words: dict[str, tuple[str, list[dict]]] = {}   # word -> (sentence, options)
+    for text in texts:
+        for w in ambiguous_words(text):
+            if w not in words and len(words) < 6:
+                words[w] = (_sentence_around(text, w), sense_options(w))
+    if not words:
+        return {}
+    blocks = []
+    for w, (sentence, opts) in words.items():
+        lines = "\n".join(f"{i + 1}. {o['reading']} — {o['brief']}" for i, o in enumerate(opts))
+        blocks.append(f"词：{w}\n句子：{sentence}\n{lines}")
+    prompt = (
+        "你是词典助手。判断每个词在它的句子里用的是哪个意思，选出选项编号。\n\n"
+        + "\n\n".join(blocks)
+        + "\n\n只返回一个JSON对象，例如 {\""
+        + next(iter(words)) + "\": 1}。不要解释。"
+    )
+    try:
+        out = llm.create_chat_completion(
+            [{"role": "user", "content": prompt}], temperature=0, max_tokens=160,
+        )["choices"][0]["message"]["content"]
+        picks = json.loads(re.search(r"\{.*\}", out, re.DOTALL).group(0))
+        overrides = {}
+        for w, pick in picks.items():
+            if w in words and isinstance(pick, (int, str)) and str(pick).isdigit():
+                opts = words[w][1]
+                i = int(pick) - 1
+                if 0 <= i < len(opts):
+                    overrides[w] = (opts[i]["syllables"], opts[i]["gloss"])
+        return overrides
+    except Exception:  # noqa: BLE001 — a failed pick just keeps dictionary tips
+        return {}
+
+
+def render_chat(raw: list[dict], tips: list[dict] | None = None) -> str:
     """Build the whole transcript as one self-contained HTML block, annotating every
-    Chinese span (pinyin ruby + hover gloss)."""
+    Chinese span (pinyin ruby + hover gloss). `tips` is the per-message list of
+    disambiguation overrides, parallel to `raw`."""
     bubbles = []
     for i, m in enumerate(raw):
         u = m["role"] == "user"
@@ -711,7 +765,8 @@ def render_chat(raw: list[dict]) -> str:
         # pages); in-app we show the gloss via the CSS tooltip instead, so rename
         # the attribute. Safe: message text is html-escaped, so ` title="` can
         # only come from annotate()'s own .hz spans.
-        msg = annotate(m["content"]).replace(' title="', ' data-tip="')
+        ov = tips[i] if tips and i < len(tips) else None
+        msg = annotate(m["content"], ov).replace(' title="', ' data-tip="')
         spk = "" if u else (
             f'<button class="spk" title="朗读中文 · read the Chinese aloud"'
             f' data-speak="{html.escape(chinese_only(m["content"]), quote=True)}">🔊</button>'
@@ -769,12 +824,15 @@ def render_targets(targets: list[str] | None) -> str:
     return f'<div class="targets-row"><span class="targets-label">目标词 · practice</span>{chips}</div>'
 
 
-def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str, targets: list[str] | None):
+def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
+            targets: list[str] | None, tips: list[dict]):
     """user message + raw history → model reply.
-    Returns (chat HTML, raw history, cleared box, targets state, targets bar HTML)."""
+    Returns (chat HTML, raw history, cleared box, targets state, targets bar HTML, tips)."""
     conversational = "聊天" in mode
+    tips = tips or []
     if not user_msg.strip():
-        return render_chat(raw), raw, "", targets, render_targets(targets if conversational else None)
+        return (render_chat(raw, tips), raw, "", targets,
+                render_targets(targets if conversational else None), tips)
     if conversational:
         if not targets:
             targets = pick_targets(deck_json)
@@ -786,7 +844,12 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str, targets: 
     messages = [{"role": "system", "content": system}] + raw
     reply = llm.create_chat_completion(messages, temperature=0.7, max_tokens=512)["choices"][0]["message"]["content"]
     raw = raw + [{"role": "assistant", "content": reply}]
-    return render_chat(raw), raw, "", targets, render_targets(targets if conversational else None)
+    # one shared override dict for the two new messages (a word appearing in
+    # both almost certainly carries the same sense)
+    ov = disambiguate([user_msg, reply])
+    tips = tips + [ov, ov]
+    return (render_chat(raw, tips), raw, "", targets,
+            render_targets(targets if conversational else None), tips)
 
 
 def flashcards_srcdoc() -> str:
@@ -800,8 +863,9 @@ def flashcards_srcdoc() -> str:
 with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
     gr.HTML(HEADER_HTML)
     with gr.Tab("对话 · chat"):
-        chat_html = gr.HTML(render_chat([]))
+        chat_html = gr.HTML(render_chat([], []))
         raw_state = gr.State([])
+        tips_state = gr.State([])
         targets_state = gr.State(None)
         targets_bar = gr.HTML("")
         mode = gr.Radio(
@@ -821,11 +885,11 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
         # sample from STARTER_POOL on every page load and wires the clicks.
         gr.HTML('<div class="starters-row" id="starters"></div>')
 
-        msg.submit(respond, [msg, raw_state, mode, deck_words, targets_state],
-                   [chat_html, raw_state, msg, targets_state, targets_bar])
+        msg.submit(respond, [msg, raw_state, mode, deck_words, targets_state, tips_state],
+                   [chat_html, raw_state, msg, targets_state, targets_bar, tips_state])
         clear = gr.Button("清空 · clear", elem_id="clear-btn")
-        clear.click(lambda: (render_chat([]), [], "", None, ""), None,
-                    [chat_html, raw_state, msg, targets_state, targets_bar])
+        clear.click(lambda: (render_chat([], []), [], "", None, "", []), None,
+                    [chat_html, raw_state, msg, targets_state, targets_bar, tips_state])
     with gr.Tab("卡片 · flashcards"):
         gr.HTML(flashcards_srcdoc())
     with gr.Tab("词表 · word list"):

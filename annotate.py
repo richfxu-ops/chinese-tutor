@@ -31,9 +31,13 @@ _CJK_RUN = re.compile(r"[一-鿿]+")
 _HAS_CJK = re.compile(r"[一-鿿]")
 
 
+# Entry: (pinyin key, is_proper, [glosses], original spaced reading e.g. "di4 dao5")
+Entry = tuple[str, bool, list[str], str]
+
+
 @lru_cache(maxsize=1)
-def load_cedict() -> dict[str, list[tuple[str, bool, list[str]]]]:
-    """Parse CC-CEDICT into {simplified: [(pinyin key, is_proper, [glosses])]}.
+def load_cedict() -> dict[str, list[Entry]]:
+    """Parse CC-CEDICT into {simplified: [entries]}.
 
     ALL entries per form are kept (heteronyms like 还 hái/huán are separate
     CEDICT lines); _pick_glosses matches them against the word's in-context
@@ -45,7 +49,7 @@ def load_cedict() -> dict[str, list[tuple[str, bool, list[str]]]]:
     """
     if not CEDICT_FILE.exists():
         return {}
-    out: dict[str, list[tuple[str, bool, list[str]]]] = {}
+    out: dict[str, list[Entry]] = {}
     for line in CEDICT_FILE.read_text(encoding="utf-8").splitlines():
         if line.startswith("#") or " " not in line:
             continue
@@ -57,7 +61,7 @@ def load_cedict() -> dict[str, list[tuple[str, bool, list[str]]]]:
         except (IndexError, ValueError):
             continue
         key = reading.lower().replace(" ", "").replace("u:", "v")
-        out.setdefault(simp, []).append((key, reading != reading.lower(), glosses))
+        out.setdefault(simp, []).append((key, reading != reading.lower(), glosses, reading))
     return out
 
 
@@ -76,7 +80,34 @@ def _match_key(word: str) -> str:
 _NON_SENSE = ("CL:", "variant of", "old variant of", "used in", "also pr.", "see ")
 
 
-def _pick_glosses(word: str, cedict: dict[str, list[tuple[str, bool, list[str]]]]) -> str | None:
+def _clean_senses(glosses: list[str]) -> list[str]:
+    return [g for g in glosses if not g.startswith(_NON_SENSE) and len(g) <= 80]
+
+
+# Tone-number pinyin → tone marks ("dao4" → "dào", "lv3" → "lǚ"; tone 5 bare).
+_TONE_MARKS = {"a": "āáǎà", "o": "ōóǒò", "e": "ēéěè", "i": "īíǐì", "u": "ūúǔù", "ü": "ǖǘǚǜ"}
+
+
+def _mark_syllable(syl: str) -> str:
+    m = re.fullmatch(r"([a-zü]+)([1-5])?", syl.lower().replace("u:", "ü").replace("v", "ü"))
+    if not m:
+        return syl
+    body, tone = m.group(1), int(m.group(2) or 5)
+    if tone == 5:
+        return body
+    for target in "aeo":                      # mark a, else e, else o...
+        i = body.find(target)
+        if i >= 0:
+            break
+    else:                                     # ...else the last of i/u/ü (iu→u, ui→i)
+        idxs = [j for j, ch in enumerate(body) if ch in "iuü"]
+        if not idxs:
+            return body
+        i = idxs[-1]
+    return body[:i] + _TONE_MARKS[body[i]][tone - 1] + body[i + 1:]
+
+
+def _pick_glosses(word: str, cedict: dict[str, list[Entry]]) -> str | None:
     """Glosses for the CEDICT entry matching the word's in-context pinyin.
 
     pypinyin picks the reading from its phrase data (还钱 → huán, 还没 → hái),
@@ -96,8 +127,8 @@ def _pick_glosses(word: str, cedict: dict[str, list[tuple[str, bool, list[str]]]
     # 4 from the primary entry + 2 from each further one, 6 senses max; entries
     # with only metadata senses are skipped, not resurrected
     picked: list[str] = []
-    for i, (_, _, glosses) in enumerate(pool):
-        real = [g for g in glosses if not g.startswith(_NON_SENSE) and len(g) <= 80]
+    for i, (_, _, glosses, _) in enumerate(pool):
+        real = _clean_senses(glosses)
         picked += [g for g in real if g not in picked][: 4 if i == 0 else 2]
         if len(picked) >= 6:
             break
@@ -106,40 +137,97 @@ def _pick_glosses(word: str, cedict: dict[str, list[tuple[str, bool, list[str]]]
     return "; ".join(picked[:6])
 
 
-def _annotate_word(word: str, cedict: dict[str, list[tuple[str, list[str]]]]) -> str:
-    """One CJK word → <span title=...><ruby>字<rt>zì</rt></ruby>...</span>."""
+# --------------------------------------------------------------------------- #
+# Sense disambiguation hooks (the model call itself lives in app.py)
+# --------------------------------------------------------------------------- #
+# Words whose in-context reading is basically always right — not worth a model
+# round-trip even though CEDICT has several entries for them.
+_SKIP_DISAMBIG = {"的", "了"}
+
+
+def _meaningful_entries(word: str) -> list[Entry]:
+    cedict = load_cedict()
+    return [e for e in cedict.get(word, []) if not e[1] and _clean_senses(e[2])]
+
+
+def ambiguous_words(text: str) -> list[str]:
+    """Annotation tokens of `text` with 2+ real CEDICT entries (地道, 还, 花...),
+    in first-appearance order — the words worth asking the model about."""
+    out: list[str] = []
+    for m in _CJK_RUN.finditer(text):
+        for token in jieba.cut(m.group()):
+            if (
+                token not in out
+                and token not in _SKIP_DISAMBIG
+                and _HAS_CJK.search(token)
+                and len(_meaningful_entries(token)) >= 2
+            ):
+                out.append(token)
+    return out
+
+
+def sense_options(word: str) -> list[dict]:
+    """One dict per candidate sense of `word`, for the disambiguation prompt and
+    for building the override once the model picks: {reading, syllables, brief, gloss}."""
+    opts = []
+    for _, _, glosses, reading in _meaningful_entries(word):
+        senses = _clean_senses(glosses)
+        syllables = [_mark_syllable(s) for s in reading.split()]
+        opts.append({
+            "reading": " ".join(syllables),
+            "syllables": syllables,
+            "brief": "; ".join(senses[:2]),
+            "gloss": "; ".join(senses[:4]),
+        })
+    return opts
+
+
+def _annotate_word(word: str, cedict: dict[str, list[Entry]],
+                   overrides: dict[str, tuple[list[str], str]] | None) -> str:
+    """One CJK word → <span title=...><ruby>字<rt>zì</rt></ruby>...</span>.
+
+    An override — (syllables, gloss) picked by the model for this message —
+    replaces both the gloss and, when the syllable count lines up, the ruby
+    pinyin (地道 as "authentic" reads dì dao, not dì dào)."""
     syllables = _word_pinyin(word)
+    gloss = _pick_glosses(word, cedict)
+    if overrides and word in overrides:
+        ov_syls, gloss = overrides[word]
+        if len(ov_syls) == len(word):
+            syllables = ov_syls
     ruby = "".join(
         f"<ruby>{html.escape(ch)}<rt>{html.escape(py)}</rt></ruby>"
         for ch, py in zip(word, syllables)
     )
     reading = " ".join(syllables)
-    gloss = _pick_glosses(word, cedict)
     title = f"{reading} — {gloss}" if gloss else reading
     return f'<span class="hz" title="{html.escape(title, quote=True)}">{ruby}</span>'
 
 
-def _annotate_cjk_run(run: str, cedict: dict[str, list[tuple[str, list[str]]]]) -> str:
+def _annotate_cjk_run(run: str, cedict: dict[str, list[Entry]],
+                      overrides: dict[str, tuple[list[str], str]] | None) -> str:
     """Segment a CJK run and annotate each token (punctuation passes through)."""
     parts = []
     for token in jieba.cut(run):
         if _HAS_CJK.search(token):
-            parts.append(_annotate_word(token, cedict))
+            parts.append(_annotate_word(token, cedict, overrides))
         else:
             parts.append(html.escape(token))
     return "".join(parts)
 
 
-def annotate(text: str) -> str:
+def annotate(text: str, overrides: dict[str, tuple[list[str], str]] | None = None) -> str:
     """Annotate all CJK spans in `text`; leave non-CJK (English) escaped but plain.
 
-    Newlines become <br> so multi-line tutor replies keep their shape in HTML.
+    `overrides` maps word → (syllables, gloss) for senses the model picked in
+    this message's context (see app.py's disambiguate). Newlines become <br>
+    so multi-line tutor replies keep their shape in HTML.
     """
     cedict = load_cedict()
     out, last = [], 0
     for m in _CJK_RUN.finditer(text):
-        out.append(html.escape(text[last:m.start()]))      # non-CJK gap
-        out.append(_annotate_cjk_run(m.group(), cedict))   # CJK run
+        out.append(html.escape(text[last:m.start()]))                 # non-CJK gap
+        out.append(_annotate_cjk_run(m.group(), cedict, overrides))   # CJK run
         last = m.end()
     out.append(html.escape(text[last:]))
     return "".join(out).replace("\n", "<br>")
