@@ -64,6 +64,19 @@ def make_item_batches(items: list[str], n: int, per_call: int, rng: random.Rando
     return [pool[i : i + per_call] for i in range(0, n, per_call)]
 
 
+def assign_modes(n_batches: int, rng: random.Random) -> list[str]:
+    """One correction MODE per batch, distributed per config.CORRECTION_MODES.
+    Short counts are padded with 'error' (keep detection sharp), then shuffled and
+    trimmed to exactly n_batches so no single mode is systematically dropped."""
+    modes: list[str] = []
+    for mode, frac in c.CORRECTION_MODES.items():
+        modes += [mode] * round(n_batches * frac)
+    while len(modes) < n_batches:
+        modes.append("error")
+    rng.shuffle(modes)
+    return modes[:n_batches]
+
+
 # --------------------------------------------------------------------------- #
 # Prompt assembly
 # --------------------------------------------------------------------------- #
@@ -96,8 +109,111 @@ Return ONLY a JSON array of {len(items)} objects, each {{"user": "...", "assista
 No markdown, no commentary."""
 
 
-def build_conversation_prompt(topic: str, words: list[str]) -> str:
-    """Teacher prompt for ONE multi-turn conversation-practice example."""
+# Per-mode teacher instructions for the correction task. The whole point of the
+# mix is to teach the model that NOT every checked sentence has an error — the
+# tuned 7B over-corrected because 100% of its correction examples fixed an error.
+# See config.CORRECTION_MODES and DECISIONS 2026-07-11.
+_CORRECTION_MODE_INSTRUCTIONS = {
+    "error": (
+        "MODE — real error: each learner sentence contains ONE realistic HSK-5 error "
+        "involving the target word (word order, measure word, 了/过 aspect, a wrong "
+        "collocation, a misused near-synonym, etc.). The assistant points out the "
+        "problem, gives the corrected sentence, and explains the rule in one short line.\n"
+        "STRICT:\n"
+        "- The stated rule MUST be factually true AND consistent with your corrected "
+        "sentence. Never invent a rule; never mislabel a word's part of speech or "
+        "transitivity unless it truly is so.\n"
+        "- The corrected sentence must genuinely fix the error and be natural, native "
+        "Chinese.\n"
+        "- Correct ONLY that error — do not nitpick anything else."
+    ),
+    "correct": (
+        "MODE — already correct: each learner sentence is ALREADY fully correct, "
+        "natural, native HSK-5 Chinese — NO error of any kind — and the learner asks "
+        "whether it is right. The assistant CONFIRMS it is correct and briefly notes "
+        "what the learner did well (the right collocation / structure / word choice).\n"
+        "STRICT:\n"
+        "- Do NOT invent an error and do NOT offer a 'better' version. 'Yes, this is "
+        "correct' is the entire point — the model must learn to leave correct Chinese "
+        "alone.\n"
+        "- One short encouraging or related-usage note is allowed, but it must clearly "
+        "be EXTRA info, never framed as a correction."
+    ),
+    "polish": (
+        "MODE — awkward but not wrong: each learner sentence is GRAMMATICALLY CORRECT "
+        "and fully understandable but phrased a little awkwardly / less idiomatically "
+        "than a native speaker would — this is NOT an error. The assistant FIRST makes "
+        "clear the sentence is correct and understandable, THEN offers a more natural "
+        "phrasing as OPTIONAL polish.\n"
+        "STRICT:\n"
+        "- Be explicit that it is not wrong (e.g. “你这样说没有错，别人完全能听懂”), and "
+        "introduce the alternative as “a more natural way to say it” — NEVER as a mistake.\n"
+        "- Both the learner's version and the alternative must be correct Chinese; the "
+        "alternative must be genuinely more idiomatic."
+    ),
+    "ambiguous": (
+        "MODE — depends on intent: each learner sentence's correctness DEPENDS ON WHAT "
+        "THE LEARNER MEANT — it has two valid readings, or is fine in one context but "
+        "not another — and the learner asks if it is right. The assistant does NOT "
+        "simply call it wrong: it says the sentence works if the learner means X, notes "
+        "the other reading, and asks a brief clarifying question about the intended "
+        "meaning.\n"
+        "STRICT:\n"
+        "- Do not fabricate an error; the point is to ask for clarification instead of "
+        "over-correcting.\n"
+        "- Both interpretations must be correct, natural Chinese."
+    ),
+}
+
+
+def build_correction_prompt(mode: str, items: list[str]) -> str:
+    """Teacher prompt for the correct_sentence task in one response MODE (see
+    config.CORRECTION_MODES). Same JSON-array shape as build_teacher_prompt so it
+    plugs into the same parse/wrap path — only the instruction body differs."""
+    targets = "\n".join(f"{i + 1}. {it}" for i, it in enumerate(items))
+    return f"""You are creating synthetic training data for a Chinese tutoring model \
+aimed at HSK-5 learners. This batch is the "check my sentence" task.
+
+The tutor (the "assistant") MUST follow this persona exactly:
+---
+{c.SYSTEM_PROMPT}
+---
+
+{_CORRECTION_MODE_INSTRUCTIONS[mode]}
+
+Produce exactly {len(items)} examples, ONE for each target word below, in order:
+{targets}
+
+For each example:
+- "user": a realistic learner message that presents a sentence using the target word \
+and asks the tutor to check it (Chinese, English, or a mix — vary the phrasing).
+- "assistant": the ideal tutor reply for THIS mode, following the persona and the mode \
+rules above, kept at HSK-5 level. Bilingual (Chinese + English), no inline pinyin.
+
+Return ONLY a JSON array of {len(items)} objects, each {{"user": "...", "assistant": "..."}}. \
+No markdown, no commentary."""
+
+
+def build_conversation_prompt(topic: str, words: list[str], has_errors: bool = True) -> str:
+    """Teacher prompt for ONE multi-turn conversation-practice example. When
+    has_errors is False the learner writes only correct Chinese and the tutor
+    corrects nothing — teaching it to leave correct turns alone (the 聊天 half of
+    the over-correction fix)."""
+    if has_errors:
+        learner_rule = (
+            "- The learner is a realistic HSK-5 student writing in Chinese. Make the "
+            "learner give a SHORT, low-effort answer (like “还行吧。” or “没什么特别的。”) "
+            "at least twice, and make 1–2 natural learner mistakes (word order, 了/过, "
+            "collocation, measure word, 词语搭配) somewhere in the middle turns."
+        )
+    else:
+        learner_rule = (
+            "- The learner is a realistic HSK-5 student writing in Chinese, and writes "
+            "ONLY correct Chinese — plant NO mistakes anywhere. Still give a SHORT, "
+            "low-effort answer (like “还行吧。” or “没什么特别的。”) at least twice so the "
+            "tutor practices pushing past them. The tutor must NOT correct anything "
+            "(there is nothing to correct) — it just keeps the conversation going."
+        )
     return f"""You are creating synthetic training data for a Chinese tutoring model \
 aimed at HSK-5 learners — this task is MULTI-TURN CONVERSATION practice.
 
@@ -112,19 +228,19 @@ Write ONE complete practice conversation between a learner ("user") and the tuto
 Requirements:
 - 8–12 messages total, strictly alternating roles, starting with "user" and ending \
 with "assistant".
-- The learner is a realistic HSK-5 student writing in Chinese. Make the learner give \
-a SHORT, low-effort answer (like "还行吧。" or "没什么特别的。") at least twice, and \
-make 1–2 natural learner mistakes (word order, 了/过, collocation, measure word, \
-词语搭配) somewhere in the middle turns.
+{learner_rule}
 - The tutor must demonstrate its persona in every turn: lead the topic with its own \
-opinions/experiences, push past lazy answers with concrete follow-up questions, use \
-or explicitly invite a target word in EVERY tutor turn, and end every tutor turn with \
-one open-ended question. 2–4 sentences per tutor turn, HSK-5 Chinese only, no pinyin, \
-and no English outside correction explanations.
-- Corrections are CLOSED-WORLD: the tutor corrects the mistakes you planted, and \
-NOTHING else — never "correct" a sentence that is already correct Chinese, and never \
-invent a rule. Every correction gives the corrected sentence AND one short English \
-sentence explaining the actual rule, then moves on with the topic.
+opinions/experiences, push past lazy answers with concrete follow-up questions, and \
+end every tutor turn with one open-ended question. 2–4 sentences per tutor turn, HSK-5 \
+Chinese only, no pinyin, and no English outside correction explanations.
+- Target words: in EVERY tutor turn, work in a target word — but PREFER inviting the \
+learner to use it (e.g. “你能用‘把握’说说吗？”) or using it only where it truly fits. \
+If a target word would be forced or unnatural in the tutor's own sentence, INVITE its \
+use instead of cramming it in. A forced, unnatural insertion is worse than an invitation.
+- Corrections are CLOSED-WORLD: the tutor corrects ONLY the mistakes you planted (if \
+any), and NOTHING else — never "correct" a sentence that is already correct Chinese, \
+and never invent a rule. Every correction gives the corrected sentence AND one short \
+English sentence explaining the actual rule, then moves on with the topic.
 - Keep the whole conversation under about 800 Chinese characters.
 
 Return ONLY a JSON object: {{"messages": [{{"role": "user", "content": "..."}}, \
@@ -164,23 +280,27 @@ def extract_json_array(text: str) -> list[dict]:
     raise ValueError(f"no JSON array found in response: {text[:200]!r}")
 
 
-def to_records(task: c.TaskSpec, items: list[str], pairs: list[dict]) -> list[dict]:
-    """Wrap teacher {user, assistant} pairs into the final chat schema."""
+def to_records(task: c.TaskSpec, items: list[str], pairs: list[dict],
+               mode: str | None = None) -> list[dict]:
+    """Wrap teacher {user, assistant} pairs into the final chat schema. `mode` (set
+    only for correct_sentence) is recorded so the split/eval can see the response-type
+    breakdown; the model never sees it."""
     if len(pairs) != len(items):
         print(f"  ~ {task.name}: teacher returned {len(pairs)} pairs for {len(items)} items (keeping {min(len(pairs), len(items))})")
     records = []
     for item, pair in zip(items, pairs):
-        records.append(
-            {
-                "task": task.name,
-                "hsk_target": [item],
-                "messages": [
-                    {"role": "system", "content": c.SYSTEM_PROMPT},
-                    {"role": "user", "content": pair["user"].strip()},
-                    {"role": "assistant", "content": pair["assistant"].strip()},
-                ],
-            }
-        )
+        rec = {
+            "task": task.name,
+            "hsk_target": [item],
+            "messages": [
+                {"role": "system", "content": c.SYSTEM_PROMPT},
+                {"role": "user", "content": pair["user"].strip()},
+                {"role": "assistant", "content": pair["assistant"].strip()},
+            ],
+        }
+        if mode:
+            rec["correction_mode"] = mode
+        records.append(rec)
     return records
 
 
@@ -217,10 +337,11 @@ def to_conversation_record(words: list[str], msgs: list[dict]) -> dict:
     }
 
 
-def generate_conversation(client, topic: str, words: list[str], retries: int = 2) -> list[dict]:
+def generate_conversation(client, topic: str, words: list[str], has_errors: bool = True,
+                          retries: int = 2) -> list[dict]:
     """One API call → one multi-turn record (as a 1-element list, so results
     plug into the same per-task collection as the single-turn batches)."""
-    prompt = build_conversation_prompt(topic, words)
+    prompt = build_conversation_prompt(topic, words, has_errors)
     last_err = None
     for _ in range(retries + 1):
         try:
@@ -238,9 +359,11 @@ def generate_conversation(client, topic: str, words: list[str], retries: int = 2
     return []
 
 
-def generate_batch(client, task: c.TaskSpec, items: list[str], retries: int = 2) -> list[dict]:
-    """One API call → up to len(items) records. Retries on parse failure."""
-    prompt = build_teacher_prompt(task, items)
+def generate_batch(client, task: c.TaskSpec, items: list[str], mode: str | None = None,
+                   retries: int = 2) -> list[dict]:
+    """One API call → up to len(items) records. Retries on parse failure. `mode`
+    is set only for correct_sentence and selects the response-type prompt."""
+    prompt = build_correction_prompt(mode, items) if mode else build_teacher_prompt(task, items)
     last_err = None
     for _ in range(retries + 1):
         try:
@@ -251,7 +374,7 @@ def generate_batch(client, task: c.TaskSpec, items: list[str], retries: int = 2)
                 messages=[{"role": "user", "content": prompt}],
             )
             pairs = extract_json_array(response_text(resp))
-            return to_records(task, items, pairs)
+            return to_records(task, items, pairs, mode)
         except Exception as e:  # noqa: BLE001 — never let one bad batch (API error,
             last_err = e        # rate limit, odd response shape) kill the whole paid run
     print(f"  ! dropped a {task.name} batch after {retries + 1} tries: {last_err}")
@@ -280,38 +403,56 @@ def run(limit: int | None, workers: int, dry_run: bool, only: str | None) -> Non
     grammar = load_seed(c.GRAMMAR_FILE)
 
     # Plan every teacher call up front (cheap, no API). Single-turn tasks are
-    # batched EXAMPLES_PER_CALL per call; conversations are one per call.
-    plan: list[tuple[c.TaskSpec, list[str]]] = []
+    # batched EXAMPLES_PER_CALL per call; conversations are one per call. The third
+    # tuple slot is the correction MODE (None for every non-correction task).
+    plan: list[tuple[c.TaskSpec, list[str], str | None]] = []
     for task in c.TASKS:
         if only and task.name != only:
             continue
         n = min(task.n, limit) if limit else task.n
         seed = grammar if task.needs_grammar else vocab
-        for batch in make_item_batches(seed, n, c.EXAMPLES_PER_CALL, rng):
-            plan.append((task, batch))
+        batches = make_item_batches(seed, n, c.EXAMPLES_PER_CALL, rng)
+        if task.name == "correct_sentence":
+            for batch, mode in zip(batches, assign_modes(len(batches), rng)):
+                plan.append((task, batch, mode))
+        else:
+            for batch in batches:
+                plan.append((task, batch, None))
 
-    conv_plan: list[tuple[str, list[str]]] = []
+    conv_plan: list[tuple[str, list[str], bool]] = []
     if only in (None, "conversation"):
         n = min(c.CONV_N, limit) if limit else c.CONV_N
-        for words in make_item_batches(vocab, n * c.CONV_WORDS_PER, c.CONV_WORDS_PER, rng):
-            conv_plan.append((rng.choice(c.CONV_TOPICS), words))
+        conv_batches = make_item_batches(vocab, n * c.CONV_WORDS_PER, c.CONV_WORDS_PER, rng)
+        # a fixed fraction of conversations are error-free (tutor corrects nothing)
+        n_free = round(len(conv_batches) * c.CONV_ERROR_FREE_FRAC)
+        flags = [False] * n_free + [True] * (len(conv_batches) - n_free)
+        rng.shuffle(flags)
+        for words, has_errors in zip(conv_batches, flags):
+            conv_plan.append((rng.choice(c.CONV_TOPICS), words, has_errors))
 
     if dry_run:
-        print(f"DRY RUN — {len(plan)} single-turn batches + {len(conv_plan)} conversations planned. "
-              f"Showing the first prompt per task:\n")
+        n_corr = sum(1 for _, _, m in plan if m)
+        print(f"DRY RUN — {len(plan)} single-turn batches ({n_corr} correction) + "
+              f"{len(conv_plan)} conversations planned. Showing one prompt per task "
+              f"(and per correction mode / conversation variant):\n")
         seen = set()
-        for task, batch in plan:
-            if task.name in seen:
+        for task, batch, mode in plan:
+            key = (task.name, mode)
+            if key in seen:
                 continue
-            seen.add(task.name)
-            print(f"{'=' * 70}\nTASK: {task.name}  (targets: {batch})\n{'=' * 70}")
-            print(build_teacher_prompt(task, batch))
+            seen.add(key)
+            label = task.name + (f"  [mode={mode}]" if mode else "")
+            print(f"{'=' * 70}\nTASK: {label}  (targets: {batch})\n{'=' * 70}")
+            print(build_correction_prompt(mode, batch) if mode else build_teacher_prompt(task, batch))
             print()
-        if conv_plan:
-            topic, words = conv_plan[0]
-            print(f"{'=' * 70}\nTASK: conversation  (topic: {topic}, targets: {words})\n{'=' * 70}")
-            print(build_conversation_prompt(topic, words))
-            print()
+        for has_errors in (True, False):
+            match = next((cp for cp in conv_plan if cp[2] == has_errors), None)
+            if match:
+                topic, words, _ = match
+                print(f"{'=' * 70}\nTASK: conversation  [errors={has_errors}]  "
+                      f"(topic: {topic}, targets: {words})\n{'=' * 70}")
+                print(build_conversation_prompt(topic, words, has_errors))
+                print()
         return
 
     from anthropic import Anthropic
@@ -325,8 +466,9 @@ def run(limit: int | None, workers: int, dry_run: bool, only: str | None) -> Non
     by_task: dict[str, list[dict]] = {t.name: [] for t in c.TASKS}
     by_task["conversation"] = []
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(generate_batch, client, task, batch) for task, batch in plan]
-        futures += [pool.submit(generate_conversation, client, topic, words) for topic, words in conv_plan]
+        futures = [pool.submit(generate_batch, client, task, batch, mode) for task, batch, mode in plan]
+        futures += [pool.submit(generate_conversation, client, topic, words, has_errors)
+                    for topic, words, has_errors in conv_plan]
         for i, fut in enumerate(futures, 1):
             recs = fut.result()
             if recs:
@@ -344,6 +486,10 @@ def run(limit: int | None, workers: int, dry_run: bool, only: str | None) -> Non
         eval_.extend(recs[:k])
         train.extend(recs[k:])
         print(f"  {name:16s} {len(recs):4d} generated -> {len(recs) - k} train / {k} eval")
+        if name == "correct_sentence":
+            from collections import Counter
+            breakdown = Counter(r.get("correction_mode", "?") for r in recs)
+            print(f"  {'':16s}      modes: {dict(breakdown)}")
 
     # --only runs APPEND to the existing data (a full run regenerates everything).
     if only:

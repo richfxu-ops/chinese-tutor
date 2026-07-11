@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QA sweep — 2026-07-11</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .verdict { border-left: 4px solid var(--accent, #b3302a); background: #faf4ea; padding: .8rem 1.1rem; border-radius: 4px; margin: 1rem 0; }
+  .zh { font-family: "Songti SC", serif; }
+  .bad { color: #8f241f; font-weight: 600; }
+  .ok { color: #2f6e5d; font-weight: 600; }
+  table { font-size: .95rem; }
+  .ex { background: #fbf7ef; border: 1px solid #e6dcc6; border-radius: 4px; padding: .5rem .8rem; margin: .5rem 0; font-size: .95rem; }
+  .ex .u { color: #555; } .ex .t { color: #26201a; }
+  .tag { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; padding: .1rem .45rem; border-radius: 3px; font-weight: 600; }
+  .t-data { background: #e7f0ea; color: #2f6e5d; }
+  .t-cap { background: #f6e3e0; color: #8f241f; }
+  .t-serve { background: #eae3f0; color: #5b3a8f; }
+  .t-prompt { background: #f0ecd9; color: #7a6a1c; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="crumb"><a href="index.html">← docs</a></p>
+  <p class="eyebrow">QA · report</p>
+  <h1>Multi-scenario QA sweep of the HSK-5 tutor</h1>
+  <p class="lead">61 real serve-layer exchanges — 5 conversations, 16 Q&amp;A prompts, 3-roll consistency checks — generated headlessly through the exact <code>app.py</code> prompts and gates, then graded against the tutor's own Chinese, correction truth, the bilingual/Chinese-only contracts, driving, level, coherence, and consistency.</p>
+
+  <div class="verdict">
+    <strong>Headline:</strong> The tutor <strong>drives conversation well, stays coherent over long sessions, and honors both language contracts.</strong> Its one serious, reproducible flaw is <strong class="bad">inventing grammar errors in sentences that are already correct</strong> — and often "fixing" them into <em>worse</em> Chinese. This is a <span class="tag t-data">data</span> gap, not a model-size ceiling. <strong>Recommendation: do one data iteration + retrain before considering Qwen-14B.</strong>
+  </div>
+
+  <h2>How this was measured</h2>
+  <p>A headless harness imported <code>app.py</code> (loading the same GGUF the app serves) and pushed simulated students through <code>respond()</code>'s real logic — same system prompts (<code>SYSTEM_PROMPT_APP</code> / <code>conversation_system()</code>), same temperature 0.7, same correction-extraction, enforcement, disambiguation, and translation-fill gates. So every judgment below is about the <em>shipped</em> behavior, not a re-implementation. Generation was fast: <strong>1.8&nbsp;s mean, 6.3&nbsp;s max</strong> per turn on Metal. A browser pass confirmed the serve-layer features end to end (starters valid, streaming→annotate swap, hover tips, Q&amp;A fills, 聊天 English-input path, no console errors).</p>
+
+  <h2>The main finding: false corrections on correct input</h2>
+  <p>Whenever a grammatically <em>correct</em> sentence was shown, the tutor frequently fabricated an error and "corrected" it — usually into something ungrammatical.</p>
+  <table>
+    <thead><tr><th>Where</th><th>False corrections</th></tr></thead>
+    <tbody>
+      <tr><td>聊天 (chat_correct)</td><td class="bad">2 / 6 turns</td></tr>
+      <tr><td>Q&amp;A correct-sentence probes</td><td class="bad">1 / 2</td></tr>
+      <tr><td>Consistency: <span class="zh">我每天早上七点起床</span> ×3 rolls</td><td class="bad">3 / 3 rolls</td></tr>
+      <tr><td><strong>Correct-sentence presentations, combined</strong></td><td class="bad"><strong>6 / 11 (≈55%)</strong></td></tr>
+    </tbody>
+  </table>
+
+  <p>The consistency roll is the clearest proof: one perfectly correct sentence, three rolls, <strong>three different invented rules</strong> — and roll 3's "fix" is itself wrong Chinese:</p>
+  <div class="ex">
+    <div class="u zh">student: 我每天早上七点起床。 <span style="color:#2f6e5d">(correct — "I get up at 7 every morning")</span></div>
+    <div class="t">roll 1 → <span class="zh">七点钟</span> is "missing a measure word" <span class="bad">(false — 七点 is standard)</span></div>
+    <div class="t">roll 2 → garbled rule about <span class="zh">早上/在</span>, no real fix</div>
+    <div class="t">roll 3 → "add <span class="zh">了</span> for habitual actions" → <span class="zh bad">我每天早上七点起床了</span> <span class="bad">(ungrammatical)</span></div>
+  </div>
+  <div class="ex">
+    <div class="u zh">student: 我觉得听力最难，因为说话的速度太快了。 <span style="color:#2f6e5d">(correct)</span></div>
+    <div class="t zh">tutor: 应该说"说话的<span class="bad">声音</span>太快了"… <span class="bad">(声音快 is wrong; 速度快 was right)</span></div>
+  </div>
+  <div class="ex">
+    <div class="u zh">student: 我已经把作业做完了。 <span style="color:#2f6e5d">(correct)</span></div>
+    <div class="t zh">tutor: 应该用"完成"不用"做"… 修改后：我已经把作业完成了。 <span class="bad">(做完 is completely standard; rule invented)</span></div>
+  </div>
+
+  <p><strong>Root cause — training data, not capability.</strong> The <code>correct_sentence</code> task (180 examples) <em>always</em> contains an error to fix. The model never saw a "this sentence is already correct — nothing to change" example, so it learned the prior "if asked to check a sentence, find something to fix." The one time it got a correct sentence right (<span class="zh">虽然…但是…</span>) shows the base model <em>can</em> tell; it just wasn't trained to. This is a <span class="tag t-data">data iteration</span> fix: add correct-sentence examples whose ideal answer confirms correctness.</p>
+
+  <p><strong>Serve-layer consequence.</strong> The correction-chip overlap gate (≥60% of the fix's characters reused from the student) can't catch these: a fabricated correction of an already-correct sentence naturally reuses almost all the student's characters, so it <em>passes</em> the gate. Chips fired on 2/6 false corrections in chat_correct — meaning false corrections can flow into the flashcard deck as fix-cards that teach wrong Chinese. The durable fix is upstream (data), not a tighter gate.</p>
+
+  <h2>Second finding: confabulated grammar rules</h2>
+  <p>Even when the tutor caught a real error and produced a reasonable corrected sentence, the stated <em>reason</em> was often wrong or self-contradictory. Among the 7 corrections issued on genuinely-wrong sentences in chat_errors, <strong>~3 carried a flawed rule</strong>:</p>
+  <div class="ex">
+    <div class="u zh">他比我更高很多。</div>
+    <div class="t zh">fix "他比我高很多" ✓, but rule: "形容词后面要加'得'" — <span class="bad">contradicts its own fix (which has no 得)</span></div>
+  </div>
+  <div class="ex">
+    <div class="u zh">我去过北京去年。</div>
+    <div class="t zh">"修改后"：我去过北京去年 <span class="bad">(identical — no change)</span>; rule says time words go <em>after</em> the verb <span class="bad">(backwards)</span></div>
+  </div>
+  <div class="ex">
+    <div class="u zh">我把这本书看。</div>
+    <div class="t zh">fix "看完" ✓, but calls 看 an <span class="bad">不及物动词 (intransitive) — it's transitive</span></div>
+  </div>
+  <div class="ex">
+    <div class="u">Q&amp;A: "居然 vs 竟然?"</div>
+    <div class="t zh">"居然…常常是好的结果" <span class="bad">(false — 居然 is neutral/negative surprise)</span>, and "可以互换使用"</div>
+  </div>
+  <p>This is the one place with a genuine <span class="tag t-cap">capability</span> signal: producing the right <em>surface correction</em> is a pattern the fine-tune learned; explaining the underlying rule is <em>knowledge</em>, and the 7B confabulates it. But note two mitigating facts: (a) the "no-change fix + backwards rule" cases are downstream of the same must-find-an-error data artifact, and (b) the flaw degrades the <em>explanation</em>, not usually the corrected sentence — less harmful than teaching a fake error. Worth re-measuring after the data fix before treating it as a model-size ceiling.</p>
+
+  <h2>Third finding: forced target words</h2>
+  <p>The "every 聊天 reply must use a target word or invite one" rule occasionally forces a semantically broken insertion (~2–3 / 37 turns):</p>
+  <div class="ex">
+    <div class="t zh">感觉<span class="bad">必然</span>跟朋友打电话聊天 <span class="bad">(必然 "inevitably" is nonsense here)</span></div>
+  </div>
+  <p><span class="tag t-prompt">prompt</span>/<span class="tag t-cap">capability</span> — the softer "when natural" phrasing was already tried and ignored by the 7B (per DECISIONS 2026-07-10). A 14B would likely satisfy the hard constraint more naturally; a cheaper partial fix is to let the tutor invite usage more and self-insert less.</p>
+
+  <h2>What works well</h2>
+  <table>
+    <thead><tr><th>Dimension</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Driving past lazy answers</td><td class="ok">7/7 lazy turns pushed (光说"还行"可不够嘛 / 别偷懒嘛 …)</td></tr>
+      <tr><td>Ends with an open question</td><td class="ok">32/37 (the 5 misses are the natural wind-down of chat_long)</td></tr>
+      <tr><td>Multi-turn coherence (chat_long, 10 turns)</td><td class="ok">0 contradictions, 0 repetition loops; builds topics, remembers context</td></tr>
+      <tr><td>Q&amp;A bilingual contract</td><td class="ok">17/17 untranslated lines caught &amp; filled → fully bilingual</td></tr>
+      <tr><td>聊天 Chinese-only contract</td><td class="ok">0 English drift, 0 fully-English conversions needed across 37 turns</td></tr>
+      <tr><td>聗天 English-input path</td><td class="ok">translate-before-model worked; typed English shown, annotated Chinese beneath</td></tr>
+      <tr><td>Serve mechanics</td><td class="ok">disambiguation every turn, starters valid, streaming→annotate swap, no console errors</td></tr>
+      <tr><td>HSK-5 level fit</td><td class="ok">well-calibrated; example sentences appropriate; no egregious over-level</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Failure rates at a glance</h2>
+  <table>
+    <thead><tr><th>Issue</th><th>Rate</th><th>Fix layer</th></tr></thead>
+    <tbody>
+      <tr><td>False correction on a correct sentence</td><td class="bad">6/11 presentations (≈55%)</td><td><span class="tag t-data">data + retrain</span></td></tr>
+      <tr><td>Wrong / self-contradictory rule on a real correction</td><td>~3/7 chat_errors corrections</td><td><span class="tag t-cap">capability</span> + <span class="tag t-data">data</span></td></tr>
+      <tr><td>Forced target word → unnatural Chinese</td><td>~2–3/37 聊天 turns</td><td><span class="tag t-prompt">prompt</span>/<span class="tag t-cap">capability</span></td></tr>
+      <tr><td>Minor garbled clause (e.g. <span class="zh">意思是一起的</span>)</td><td>~2/16 Q&amp;A</td><td><span class="tag t-cap">capability</span> (temp noise)</td></tr>
+      <tr><td>Correction chip fires on a false correction</td><td>2/6 chat_correct</td><td><span class="tag t-serve">serve</span> (mitigate) / <span class="tag t-data">data</span> (cure)</td></tr>
+      <tr><td>Correction chip absent in Q&amp;A (修改后 format)</td><td>coverage gap</td><td><span class="tag t-serve">serve</span> (minor)</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Recommendation: data iteration first, not Qwen-14B</h2>
+  <p>The dominant, most damaging failure — false corrections at ~55% on correct input — is a <strong>training-data gap the model was never shown how to avoid</strong>, not a capability ceiling. That's the cheap, high-leverage fix:</p>
+  <ol>
+    <li><strong>Add "already-correct" examples to <code>correct_sentence</code></strong> in <code>gen_data.py</code>: ~30–40% of that task's prompts should be sentences with <em>no</em> error, where the ideal assistant answer confirms correctness and maybe offers an optional polish — never inventing a fault. Teach the "nothing to fix" response explicitly.</li>
+    <li><strong>Tighten the correction-task instruction</strong> to require the stated rule to be consistent with the corrected sentence (targets the confabulated-rule cases that are data-driven).</li>
+    <li><strong>Retrain</strong> (gen_data → Colab A100 → merge → GGUF, ~1h) and <strong>re-run this exact harness</strong> to measure the new false-correction rate.</li>
+  </ol>
+  <p><strong>Only escalate to Qwen2.5-14B if confabulated grammar <em>rules</em> stay high on genuinely-wrong sentences after the data fix.</strong> The 14B (~9GB Q4, fits the Mac, ~2× serve latency → ~4s/turn, same pipeline) is a reasonable fallback and would help most with the one true capability signal (metalinguistic grammar knowledge) and with satisfying the target-word constraint naturally. But jumping now would (a) mask the data bug — a bigger model still shouldn't be trained to always find an error — and (b) cost a retrain cycle either way. Fix the data, re-measure, then decide. The 7B's driving, coherence, and contract adherence are already good; nothing there argues for more size.</p>
+
+  <p class="eyebrow" style="margin-top:2rem">Transcripts and the harness live in the session scratchpad (not committed). Findings logged in <code>planning/DECISIONS.md</code>; follow-ups in <code>planning/TASKS.md</code>.</p>
+</div>
+</body>
+</html>

@@ -28,7 +28,13 @@ GGUF_FILE = OUTPUT_DIR / "hsk5-tutor-q4_k_m.gguf"        # quantized model app.p
 # --------------------------------------------------------------------------- #
 # Models
 # --------------------------------------------------------------------------- #
-BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"       # student model we fine-tune
+BASE_MODEL = "Qwen/Qwen2.5-14B-Instruct"      # student model we fine-tune (7B → 14B:
+                                              # QA sweep 2026-07-11 found wrong-rule
+                                              # confabulation is capability-bound, and the
+                                              # train.jsonl audit found the rules are ~99%
+                                              # clean — so a bigger base is the lever. QLoRA
+                                              # 4-bit of a 14B wants an A100 on Colab; the
+                                              # merged Q4 GGUF is ~9GB, ~2× serve latency.)
 TEACHER_MODEL = "claude-sonnet-5"             # generates the synthetic data
 HSK_LEVEL = 5
 
@@ -106,6 +112,9 @@ def conversation_system(targets: list[str]) -> str:
 CONV_N = 100            # conversations to generate (1 teacher call each)
 CONV_WORDS_PER = 5      # target words per conversation (mirrors app.py pick_targets)
 CONV_MAX_CHARS = 1100   # drop over-long conversations (seq-len safety, see TrainConfig)
+CONV_ERROR_FREE_FRAC = 0.25   # fraction of conversations with NO planted mistakes — the
+                              # tutor must see correct student turns it does NOT correct
+                              # (the over-correction fix, applied to 聊天 too)
 CONV_TOPICS = [
     "周末计划", "旅行的经历", "吃饭和做菜", "工作和学习的压力", "爱好和兴趣",
     "看电影和电视剧", "运动和健康", "城市生活", "家人和朋友", "季节和天气",
@@ -118,7 +127,11 @@ CONV_TOPICS = [
 EVAL_FRACTION = 0.10          # held out per task for before/after eval
 EXAMPLES_PER_CALL = 5         # ask the teacher for N examples per API call
 GEN_TEMPERATURE = 1.0         # some variety (also required=1 when the teacher thinks)
-GEN_MAX_TOKENS = 4096         # per call — headroom for thinking + 5 bilingual examples
+GEN_MAX_TOKENS = 8192         # per call — headroom for thinking + 5 bilingual examples.
+                              # Bumped 4096→8192: the new correction modes (esp. ambiguous,
+                              # which explains two readings + a clarifying question) produce
+                              # longer replies that truncated the JSON array at 4096 and got
+                              # dropped (found in the 2026-07-11 smoke test).
 
 
 @dataclass(frozen=True)
@@ -171,12 +184,12 @@ TASKS: list[TaskSpec] = [
         needs_vocab=True,
         needs_grammar=False,
         instruction=(
-            "The user submits a Chinese sentence that contains a realistic "
-            "learner error (wrong word order, measure word, 了/过 aspect, wrong "
-            "collocation, etc.) — ideally involving the given word. The assistant "
-            "points out the problem, gives the corrected sentence, then briefly "
-            "explains why in simple terms, bilingually (Chinese + English). "
-            "No inline pinyin."
+            "The user submits a Chinese sentence and asks the tutor to check it. "
+            "The sentence may contain a real error, be already correct, be "
+            "grammatical-but-awkward, or be ambiguous — the case is chosen per example "
+            "by CORRECTION_MODES (see gen_data.build_correction_prompt). The assistant "
+            "responds appropriately for that case and NEVER invents an error. "
+            "Bilingual (Chinese + English), no inline pinyin."
         ),
     ),
     TaskSpec(
@@ -216,6 +229,19 @@ TASKS: list[TaskSpec] = [
         ),
     ),
 ]
+
+# correct_sentence response-type mix (QA sweep + train.jsonl audit, 2026-07-11).
+# The tuned 7B invented errors in already-correct sentences ~55% of the time
+# because EVERY correction example contained an error to fix — it never learned
+# that "leave it alone" is a valid answer. These four modes teach the full response
+# space; a solid block of real errors keeps error-detection sharp. gen_data assigns
+# one mode per teacher batch to keep each prompt focused; see build_correction_prompt.
+CORRECTION_MODES: dict[str, float] = {
+    "error": 0.40,      # a real learner error → correct it (rule MUST match the fix)
+    "correct": 0.35,    # already correct → CONFIRM it, invent nothing
+    "polish": 0.20,     # grammatical but awkward → optional nicer phrasing, NOT a "mistake"
+    "ambiguous": 0.05,  # correctness depends on intent → ask, don't over-correct
+}
 
 # --------------------------------------------------------------------------- #
 # Training (QLoRA — consumed by train.py on Colab)
