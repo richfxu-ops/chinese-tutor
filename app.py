@@ -14,6 +14,8 @@ shows the ANNOTATED HTML. That separation is why the state plumbing below exists
 
 from __future__ import annotations
 
+import os
+
 import gradio as gr
 from llama_cpp import Llama
 
@@ -44,21 +46,39 @@ STARTERS = [
 # The transcript is rendered as raw HTML via gr.HTML — NOT gr.Chatbot. Gradio 6's
 # Chatbot markdown pass sanitizes messages and strips the `title` attribute (and
 # non-standard tags), which kills the hover gloss. gr.HTML renders our reading-layer
-# markup (ruby pinyin + title tooltips) untouched. Styles are inlined so they always
-# apply. We keep only the RAW history (for the model) and rebuild the display each turn.
+# markup untouched (verified: <style>, ruby/rt and attributes all survive).
+#
+# Two Gradio-specific quirks this CSS works around:
+#  - Gradio ships `.gradio-container-* .prose * { color: var(--body-text-color) }`,
+#    a universal selector that recolors every element and beats inherited colors —
+#    in dark mode that's near-white text on our light bubbles. The `!important`
+#    on the .msg color rules is what keeps the transcript readable on both themes.
+#  - Native `title` tooltips are slow (~1s delay) and unreliable inside embedded
+#    webviews, so the gloss is shown with a styled CSS tooltip instead: render_chat
+#    rewrites annotate()'s title= to data-tip= and .hz:hover::after displays it.
 CHAT_CSS = """<style>
 .chat { display:flex; flex-direction:column; gap:.6rem; padding:.4rem; }
-.b { max-width:88%; border:1px solid #e4ded3; border-radius:12px; padding:.6rem .85rem; color:#211c19; }
+.b { max-width:88%; border:1px solid #e4ded3; border-radius:12px; padding:.6rem .85rem; }
 .b.u { align-self:flex-end; background:#f6e9e6; border-top-right-radius:3px; }
 .b.t { align-self:flex-start; background:#fbfaf7; border-top-left-radius:3px; }
 .b .who { font-family:ui-monospace,Menlo,monospace; font-size:.6rem; text-transform:uppercase; letter-spacing:.07em; margin-bottom:.35rem; }
 .b.u .who { color:#b3302a; text-align:right; }
 .b.t .who { color:#2f6e5d; }
 .b .msg { font-size:1.06rem; line-height:2.5; }
+.b .msg, .b .msg * { color:#211c19 !important; }
 ruby { ruby-position:over; margin:0 .02em; }
-rt { font-family:ui-monospace,Menlo,monospace; font-size:.45em; color:#b3302a; font-weight:500; }
-.hz { border-bottom:1px dotted #9a9086; cursor:help; border-radius:2px; }
-.hz:hover { background:#e7f0ec; }
+rt { font-family:ui-monospace,Menlo,monospace; font-size:.45em; font-weight:500; }
+.b .msg rt { color:#b3302a !important; }
+.hz { position:relative; border-bottom:1px dotted #9a9086; cursor:help; border-radius:2px; }
+.hz:hover { background:#e7f0ec; z-index:5; }
+.hz:hover::after {
+  content:attr(data-tip);
+  position:absolute; top:calc(100% + 4px); left:50%; transform:translateX(-50%);
+  width:max-content; max-width:min(320px, 70vw); white-space:normal;
+  background:#211c19; color:#fffdf8; font-size:.78rem; line-height:1.5; font-weight:400;
+  padding:.4rem .6rem; border-radius:6px; box-shadow:0 2px 10px rgba(0,0,0,.25);
+  pointer-events:none; z-index:20;
+}
 .empty { color:#9a9086; text-align:center; padding:2.5rem 1rem; }
 </style>"""
 
@@ -70,9 +90,14 @@ def render_chat(raw: list[dict]) -> str:
     for m in raw:
         u = m["role"] == "user"
         who = "You" if u else "老师 Tutor"
+        # annotate() emits native `title` tooltips (right for the standalone docs/
+        # pages); in-app we show the gloss via the CSS tooltip instead, so rename
+        # the attribute. Safe: message text is html-escaped, so ` title="` can
+        # only come from annotate()'s own .hz spans.
+        msg = annotate(m["content"]).replace(' title="', ' data-tip="')
         bubbles.append(
             f'<div class="b {"u" if u else "t"}"><div class="who">{who}</div>'
-            f'<div class="msg">{annotate(m["content"])}</div></div>'
+            f'<div class="msg">{msg}</div></div>'
         )
     inner = "".join(bubbles) or '<div class="empty">用中文或英文问我… (ask me anything)</div>'
     return CHAT_CSS + f'<div class="chat">{inner}</div>'
@@ -100,4 +125,5 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
     gr.Button("清空 Clear").click(lambda: (render_chat([]), [], ""), None, [chat_html, raw_state, msg])
 
 if __name__ == "__main__":
-    demo.launch()
+    # PORT is set by dev tooling when 7860 is taken; default stays 7860.
+    demo.launch(server_port=int(os.environ.get("PORT", "7860")))

@@ -5,7 +5,8 @@
       "name": "tutor",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["app.py"],
-      "port": 7860
+      "port": 7860,
+      "autoPort": true
     }
   ]
 }

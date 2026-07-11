@@ -2,7 +2,10 @@
 
 > Dated log of notable choices and *why*, so rationale isn't lost. Newest first.
 
-## 2026-07-10 — Pronunciation audio: browser TTS (flashcards) + edge-tts (chat app)
+## 2026-07-10 — Reading layer in Gradio: keep gr.HTML, `!important` colors + CSS tooltip (no iframe)
+- **Decision:** Render the transcript with `gr.HTML` (unchanged), fix readability with `!important` color rules, and show the hover gloss as a pure-CSS tooltip (`.hz:hover::after` reading a `data-tip` attribute) instead of the native `title` tooltip. `render_chat` rewrites `annotate()`'s `title=` → `data-tip=` for display; `annotate.py` and the standalone `docs/` pages keep native `title`.
+- **Why:** DOM inspection showed `gr.HTML` does **no** sanitization (verbatim `innerHTML`) — `<style>`, `ruby/rt`, and all attributes survive, so the earlier "Gradio strips it" theory was wrong and an `<iframe srcdoc>` workaround is unnecessary. The real bug was CSS: Gradio ships `.gradio-container-* .prose * { color: var(--body-text-color) }`, a universal selector that recolors every element and beats inherited colors — in dark mode that's near-white text on our light bubbles. `!important` is the only clean win against a universal selector we don't control. The CSS tooltip replaces native `title` because native tooltips have a ~1s delay and are unreliable in embedded webviews; it's also instantly verifiable.
+- **Implications:** Bubbles stay a fixed light "paper" palette on both themes (readable in dark mode by forcing dark text). If Gradio's `.prose *` rule ever changes, the `!important` rules are self-contained in `CHAT_CSS`. `app.py` also honors a `PORT` env var (dev tooling; default 7860 unchanged).
 - **Decision:** Flashcard widget uses the **browser Web Speech API** (client-side, zero-dep) for 🔊 pronunciation — done. The **chat app** will use neural **`edge-tts`** (server-side, free, consistent zh-CN neural voice) to read tutor replies aloud, wired at ship.
 - **Why:** The standalone flashcard file has no Python backend, so client-side TTS is the only option there (and macOS zh-CN voices are good). For the app, `edge-tts` gives consistent studio-quality audio regardless of the user's machine.
 - **Implications:** flashcards done; app `edge-tts` is an M3/ship task. App-layer, no retraining.

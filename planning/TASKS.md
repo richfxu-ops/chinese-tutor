@@ -13,7 +13,6 @@
 
 ## Next
 - [ ] (P1) RUN: train_colab.ipynb on Colab → adapter → eval → merge → GGUF #train #run
-- [ ] (P1) RUN: python app.py locally + verify the demo end-to-end #ship #run
 - [ ] (P2) Fill README before/after from outputs/eval_report.md #ship #M3
 
 ## In Progress
@@ -41,3 +40,5 @@
 - [x] web/flashcards.html — self-contained SM-2 review widget (localStorage, verified) #ship
 - [x] web/flashcards.html — 🔊 browser-TTS pronunciation + auto-play toggle #ship
 - [x] docs/ reference pages (how-llms-work, training-run) + long-explanation pref #infra
+- [x] RUN: python app.py locally + verify the demo end-to-end #ship #run
+- [x] Fix reading layer in Gradio: dark-mode-safe colors + CSS hover gloss (verified in-browser) #ship #M3
