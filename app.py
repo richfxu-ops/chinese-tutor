@@ -218,6 +218,17 @@ rt {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.42em; font-
 #ask .submit-button {{ background:var(--cinnabar) !important; color:var(--sheet) !important;
                       border:none !important; border-radius:3px !important; }}
 #ask .submit-button:hover {{ background:var(--cinnabar-deep) !important; }}
+/* voice input: injected by APP_JS only when SpeechRecognition exists */
+#ask {{ position:relative; }}
+#ask textarea {{ padding-right:5.6rem !important; }}
+.mic-btn {{
+  position:absolute; right:3.4rem; bottom:.5rem; z-index:5;
+  border:none; background:transparent; font-size:1.05rem; line-height:1;
+  cursor:pointer; opacity:.5; padding:.25rem; transition:opacity .15s;
+}}
+.mic-btn:hover {{ opacity:1; }}
+@keyframes mic-pulse {{ 50% {{ transform:scale(1.3); filter:drop-shadow(0 0 5px var(--cinnabar)); }} }}
+.mic-btn.rec {{ opacity:1; animation:mic-pulse 1.1s ease-in-out infinite; }}
 .starters-row {{ display:flex; flex-wrap:wrap; gap:.45rem; align-items:center; margin-top:.55rem; }}
 .starters-label {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.6rem;
                   letter-spacing:.13em; text-transform:uppercase; color:var(--ink-soft);
@@ -469,6 +480,54 @@ APP_JS = """
     speechSynthesis.speak(u);
   });
 
+  // ---- voice input: Web Speech API (Chrome; the button only appears when the
+  // API exists). Click to talk in Mandarin — interim results stream into the
+  // ask box (appended to whatever's typed), stop on click or when you pause.
+  // Recognition text is never auto-submitted: mis-hearings should be read (and
+  // fixed) by the learner before they go to the tutor.
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null;
+  const setAsk = (text) => {
+    const ta = document.querySelector('#ask textarea');
+    if (!ta) return;
+    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')
+      .set.call(ta, text);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const ensureMic = () => {
+    if (!SR) return;
+    const box = document.querySelector('#ask');
+    if (!box || box.querySelector('.mic-btn')) return;
+    const btn = document.createElement('button');
+    btn.className = 'mic-btn'; btn.type = 'button'; btn.textContent = '🎤';
+    btn.title = '点一下，说中文 · click and speak Chinese';
+    box.appendChild(btn);
+    btn.addEventListener('click', () => {
+      if (rec) { rec.stop(); return; }        // click again to stop
+      rec = new SR();
+      rec.lang = 'zh-CN'; rec.interimResults = true; rec.continuous = false;
+      const ta = document.querySelector('#ask textarea');
+      const base = ta ? ta.value : '';
+      rec.onresult = (e) => {
+        let heard = '';
+        for (const r of e.results) heard += r[0].transcript;
+        setAsk(base + heard);
+      };
+      rec.onerror = (e) => {
+        const why = { 'not-allowed': '需要麦克风权限 · mic permission needed',
+                      'no-speech': '没听到声音 · heard nothing' }[e.error] || e.error;
+        toast('语音输入 · voice input: ' + why);
+      };
+      rec.onend = () => {
+        rec = null; btn.classList.remove('rec');
+        const t = document.querySelector('#ask textarea');
+        if (t) t.focus();
+      };
+      btn.classList.add('rec');
+      rec.start();
+    });
+  };
+
   // Starter chips: a fresh random six from the pool on every page load.
   const STARTER_POOL = __STARTERS__;
   const ensureStarters = () => {
@@ -533,6 +592,7 @@ APP_JS = """
       ensureStarters();
       ensureWordlist();
       ensureDeckSync();
+      ensureMic();
       const chat = document.querySelector('.chat');
       if (!chat || chat.childElementCount === lastCount) return;
       lastCount = chat.childElementCount;
@@ -541,6 +601,7 @@ APP_JS = """
     ensureStarters();
     ensureWordlist();
     ensureDeckSync();
+    ensureMic();
   };
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', installObserver);
