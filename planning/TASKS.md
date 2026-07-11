@@ -7,7 +7,7 @@
 - [ ] (P3) ~~Optional: deploy to HF Spaces~~ — not feasible for a 7B on free Spaces; local demo only #ship #M3
 - [ ] (P3) v2 roadmap: curriculum coach — Claude writes curriculum.md/progress.md, app.py injects into Qwen prompt (app-layer, no retrain) #roadmap
 - [ ] (P3) v2 roadmap: auto-extract vocab from a conversation (jieba ∩ CC-CEDICT) into the deck #roadmap
-- [ ] (P2) app.py: edge-tts neural pronunciation of tutor Chinese replies #ship #M3
+- [ ] (P3) Upgrade chat TTS from browser speechSynthesis to edge-tts neural voices #roadmap
 - [ ] (P3) v2 roadmap: voice chat — speak your Chinese, Whisper-class ASR #roadmap
 
 ## Next
@@ -44,3 +44,5 @@
 - [x] Redesign app UI: "teacher's red ink" paper aesthetic (theme + launch css, light-only) #ship #M3
 - [x] Click-to-collect: chat word → flashcards deck (localStorage, dedup, toast) #ship #M3
 - [x] Flashcards as in-app tab (iframe srcdoc, live storage sync, paper restyle) #ship #M3
+- [x] Chat transcript: scrollbar cap + auto-scroll to newest reply #ship #M3
+- [x] Chat polish: random starter chips per load, 🔊 browser TTS on replies, follow-up-question prompt rule #ship #M3
