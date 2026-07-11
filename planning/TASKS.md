@@ -11,7 +11,8 @@
 - [ ] (P3) v2 roadmap: voice chat — speak your Chinese, Whisper-class ASR #roadmap
 
 ## Next
-- [ ] (P1) RUN: train_colab.ipynb on Colab → adapter → eval → merge → GGUF #train #run
+- [ ] (P1) RUN: gen_data.py --only conversation (smoke --limit 3 first, then full 100) #data #run
+- [ ] (P1) RUN: retrain — train_colab.ipynb on Colab → adapter → eval → merge → GGUF → swap outputs/*.gguf #train #run
 - [ ] (P2) Fill README before/after from outputs/eval_report.md #ship #M3
 
 ## In Progress

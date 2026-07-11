@@ -87,6 +87,31 @@ CONVERSATION_PROMPT = (
     "- 不要在汉字上标注拼音，保持中文文本干净。只用简体字。"
 )
 
+
+def conversation_system(targets: list[str]) -> str:
+    """The exact conversation-mode system prompt served by app.py — and used
+    verbatim as the system turn of generated conversation training data, so
+    train and serve see the same prompt."""
+    return CONVERSATION_PROMPT + (
+        f"\n- 本次对话的目标生词：{'、'.join(targets)}。"
+        "每次回复都要做到这两点之一：要么自然地用上一个目标生词，"
+        "要么直接请学生用其中一个词回答你的问题（比如“用‘承受’说说你的感受”）。"
+        "已经练过的词就换下一个。"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Conversation task (multi-turn — generated separately from TASKS)
+# --------------------------------------------------------------------------- #
+CONV_N = 100            # conversations to generate (1 teacher call each)
+CONV_WORDS_PER = 5      # target words per conversation (mirrors app.py pick_targets)
+CONV_MAX_CHARS = 1100   # drop over-long conversations (seq-len safety, see TrainConfig)
+CONV_TOPICS = [
+    "周末计划", "旅行的经历", "吃饭和做菜", "工作和学习的压力", "爱好和兴趣",
+    "看电影和电视剧", "运动和健康", "城市生活", "家人和朋友", "季节和天气",
+    "购物的习惯", "学中文的经历",
+]
+
 # --------------------------------------------------------------------------- #
 # Data generation
 # --------------------------------------------------------------------------- #
@@ -212,7 +237,10 @@ class TrainConfig:
     bnb_4bit_use_double_quant: bool = True
     # (compute dtype is picked at runtime in train.py: bf16 on A100/L4, fp16 on T4)
     # SFT
-    max_seq_len: int = 1024
+    # 1280 (was 1024) to fit multi-turn conversation examples: ~490-char system
+    # prompt + up to CONV_MAX_CHARS of turns ≈ 1.1k tokens with Qwen's tokenizer.
+    # Truncation would cut the final assistant turn, which is where the loss is.
+    max_seq_len: int = 1280
     epochs: int = 2            # enough for SFT on ~800 examples; keeps the T4 run shorter
     lr: float = 2e-4
     # Micro-batch of 2 fits a 16GB T4 — the loss logits for a 152k-vocab 7B are

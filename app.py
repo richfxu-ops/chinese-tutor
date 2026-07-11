@@ -609,12 +609,8 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str, targets: 
     if conversational:
         if not targets:
             targets = pick_targets(deck_json)
-        system = c.CONVERSATION_PROMPT + (
-            f"\n- 本次对话的目标生词：{'、'.join(targets)}。"
-            "每次回复都要做到这两点之一：要么自然地用上一个目标生词，"
-            "要么直接请学生用其中一个词回答你的问题（比如“用‘承受’说说你的感受”）。"
-            "已经练过的词就换下一个。"
-        )
+        # shared with gen_data.py so training data and serving use the same prompt
+        system = c.conversation_system(targets)
     else:
         system = c.SYSTEM_PROMPT_APP
     raw = raw + [{"role": "user", "content": user_msg}]

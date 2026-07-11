@@ -10,12 +10,14 @@ Usage (on Colab):
 
 The dataset is "conversational" (each row has a `messages` list), so SFTTrainer
 applies the tokenizer's chat template automatically — we don't format prompts by
-hand. A DataCollatorForCompletionOnlyLM masks everything up to the assistant
-header, so loss is computed only on the tutor's reply (not the repeated system
-prompt or the user turn). Our data is single-turn, which is exactly what that
-collator handles. If the response template ever fails to match, the collator
-masks the whole example and loss stays flat — the --max-steps sanity run catches
-that.
+hand. A DataCollatorForCompletionOnlyLM computes loss only on the tutor's turns:
+with BOTH instruction_template and response_template set, it masks each
+user/system segment and unmasks each assistant segment, which handles the
+multi-turn "conversation" task as well as the single-turn tasks (with only
+response_template, everything after the FIRST assistant header stays in the
+loss — including later user turns — which is wrong for multi-turn). If a
+template ever fails to match, the collator masks the whole example and loss
+stays flat — the --max-steps sanity run catches that.
 """
 
 from __future__ import annotations
@@ -35,9 +37,11 @@ from trl import DataCollatorForCompletionOnlyLM, SFTConfig, SFTTrainer
 
 import config as c
 
-# Qwen2.5 uses ChatML; the assistant turn begins with this header. The collator
-# masks all tokens before it, so only the tutor's reply contributes to the loss.
+# Qwen2.5 uses ChatML. With both templates set the collator alternates: mask
+# from each user header, unmask from each assistant header — so in multi-turn
+# examples only the tutor's turns contribute to the loss.
 RESPONSE_TEMPLATE = "<|im_start|>assistant\n"
+INSTRUCTION_TEMPLATE = "<|im_start|>user\n"
 
 
 def compute_dtype():
@@ -137,7 +141,11 @@ def main() -> None:
     # SFTTrainer applies the chat template and (given peft_config + a quantized
     # model) wraps the base with LoRA and preps it for k-bit training. The
     # collator restricts the loss to the assistant reply.
-    collator = DataCollatorForCompletionOnlyLM(RESPONSE_TEMPLATE, tokenizer=tokenizer)
+    collator = DataCollatorForCompletionOnlyLM(
+        response_template=RESPONSE_TEMPLATE,
+        instruction_template=INSTRUCTION_TEMPLATE,
+        tokenizer=tokenizer,
+    )
     trainer = SFTTrainer(
         model=model,
         args=sft_config,
