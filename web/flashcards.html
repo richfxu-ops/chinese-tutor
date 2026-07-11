@@ -40,6 +40,7 @@
   .pinyin{font-family:var(--mono);font-size:1.15rem;color:var(--seal);letter-spacing:.02em}
   .gloss{font-size:1.15rem}
   .example{margin-top:.5rem;padding-top:.8rem;border-top:1px solid var(--line);color:var(--muted);font-size:1.05rem;line-height:1.9}
+  .example-en{color:var(--faint);font-family:var(--serif);font-style:italic;font-size:.92rem;line-height:1.5;margin-top:.15rem}
   .hint{font-family:var(--mono);font-size:.72rem;color:var(--faint);margin-top:.4rem}
 
   .btns{display:flex;gap:.5rem;margin-top:1rem}
@@ -104,6 +105,7 @@
       <input id="f-pinyin" placeholder="pinyin  e.g. ānwèi">
       <input id="f-gloss" placeholder="meaning  e.g. to comfort">
       <input id="f-example" class="wide" placeholder="example sentence (optional)">
+      <input id="f-example-en" class="wide" placeholder="example translation (optional)">
       <button onclick="addFromForm()">Add card</button>
     </div>
   </details>
@@ -132,9 +134,9 @@ if (deck.length === 0){
   save();
 }
 
-function newCard(front, pinyin, gloss, example){
+function newCard(front, pinyin, gloss, example, example_en){
   return { id: front + ":" + (Date.now()+Math.round(performance.now())),
-           front, pinyin, gloss, example: example||"",
+           front, pinyin, gloss, example: example||"", example_en: example_en||"",
            ease:2.5, interval:0, reps:0, lapses:0, due:0 };  // due:0 => new, review now
 }
 
@@ -234,7 +236,8 @@ function backView(c){
       <div class="front">${esc(c.front)} <button class="spk" onclick="speak(current.front)" title="Play (p)">🔊</button>${editBtn}</div>
       <div class="pinyin">${esc(c.pinyin)}</div>
       <div class="gloss">${esc(c.gloss)}</div>
-      ${c.example ? `<div class="example">${esc(c.example)} <button class="spk sm" onclick="speak(current.example)" title="Play sentence">🔊</button></div>` : ``}
+      ${c.example ? `<div class="example">${esc(c.example)} <button class="spk sm" onclick="speak(current.example)" title="Play sentence">🔊</button>
+        ${c.example_en ? `<div class="example-en">${esc(c.example_en)}</div>` : ``}</div>` : ``}
     </div>
     <div class="btns">
       ${rateBtn("again","Again",c)}${rateBtn("hard","Hard",c)}${rateBtn("good","Good",c)}${rateBtn("easy","Easy",c)}
@@ -247,7 +250,8 @@ function editCard(){
   const stage = document.getElementById("stage");
   const fields = current.kind === "fix"
     ? [["fix","正确说法 (corrected sentence)"], ["why","解释 (why)"]]
-    : [["pinyin","pinyin"], ["gloss","meaning"], ["example","example sentence"]];
+    : [["pinyin","pinyin"], ["gloss","meaning"], ["example","example sentence"],
+       ["example_en","example translation (English)"]];
   stage.innerHTML = `<div class="card" style="text-align:left">
       <div class="front sent">${esc(current.front)}</div>
       ${fields.map(([f, label]) =>
@@ -290,16 +294,18 @@ function rate(r){
   schedule(current, r); save(); revealed = false; render();
 }
 function addFromForm(){
-  const front = val("f-front"), pinyin = val("f-pinyin"), gloss = val("f-gloss"), example = val("f-example");
+  const front = val("f-front"), pinyin = val("f-pinyin"), gloss = val("f-gloss"),
+        example = val("f-example"), exampleEn = val("f-example-en");
   if(!front){ toast("Need at least the hanzi"); return; }
-  deck.push(newCard(front, pinyin, gloss, example)); save();
-  ["f-front","f-pinyin","f-gloss","f-example"].forEach(id=>document.getElementById(id).value="");
+  deck.push(newCard(front, pinyin, gloss, example, exampleEn)); save();
+  ["f-front","f-pinyin","f-gloss","f-example","f-example-en"].forEach(id=>document.getElementById(id).value="");
   toast("Added " + front); render();
 }
 function exportTSV(){
   const rows = deck.map(c => c.kind === "fix"
     ? `${c.front}\t✓ ${c.fix}${c.why ? "<br>"+c.why : ""}`
-    : `${c.front}\t${[c.pinyin, c.gloss].filter(Boolean).join(" · ")}${c.example ? "<br>"+c.example : ""}`);
+    : `${c.front}\t${[c.pinyin, c.gloss].filter(Boolean).join(" · ")}`
+      + `${c.example ? "<br>"+c.example : ""}${c.example_en ? "<br>"+c.example_en : ""}`);
   download("hsk5-flashcards.tsv", rows.join("\n"));
   toast("Exported " + deck.length + " cards — import into Anki (Front / Back)");
 }

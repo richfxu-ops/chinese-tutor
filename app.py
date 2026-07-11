@@ -465,6 +465,7 @@ APP_JS = """
     const card = deck.find(c => c.id === res.id);
     if (!card) return;                     // removed before the model finished
     card.example = res.example;
+    card.example_en = res.example_en || '';
     localStorage.setItem(KEY, JSON.stringify(deck));
     toast('例句写好了 · fresh example for “' + card.front + '”');
     renderWordlist();
@@ -1001,16 +1002,23 @@ def gen_card_example(req_json: str) -> str:
     meaning = f"（意思：{gloss}）" if gloss else ""
     prompt = (
         f"用“{word}”{meaning}写一个HSK5水平的简单例句，能自然地体现这个词的意思。"
-        "只返回例句这一句话，不要拼音，不要翻译，不要解释。"
+        "第一行：例句（不要拼音）。第二行：这个例句的英文翻译。只返回这两行，不要解释。"
     )
     out = llm.create_chat_completion(
-        [{"role": "user", "content": prompt}], temperature=0.7, max_tokens=80,
-    )["choices"][0]["message"]["content"].strip().strip('"“”')
-    lines = [line.strip() for line in out.splitlines() if line.strip()]
+        [{"role": "user", "content": prompt}], temperature=0.7, max_tokens=120,
+    )["choices"][0]["message"]["content"].strip()
+    # strip list markers / labels the model sometimes prefixes ("1. ", "例句：")
+    unlabel = re.compile(r"^\s*(?:\d+[.、)]|[-•*]|例句[:：]?|翻译[:：]?|Translation[:：]?)\s*")
+    lines = [unlabel.sub("", line).strip().strip('"“”')
+             for line in out.splitlines() if line.strip()]
     example = lines[0][:120] if lines else ""
     if not example or word not in example:   # empty or wandered off — keep the scraped example
         return ""
-    return html.escape(json.dumps({"id": card_id, "example": example}, ensure_ascii=False))
+    # the translation is the first mostly-English line after the example; kept
+    # as its own field so the 🔊 button's zh TTS never reads English aloud
+    example_en = next((l[:160] for l in lines[1:] if _mostly_ascii(l)), "")
+    return html.escape(json.dumps(
+        {"id": card_id, "example": example, "example_en": example_en}, ensure_ascii=False))
 
 
 def flashcards_srcdoc() -> str:
