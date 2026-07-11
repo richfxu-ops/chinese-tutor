@@ -24,7 +24,8 @@ import gradio as gr
 from llama_cpp import Llama
 
 import config as c
-from annotate import ambiguous_words, annotate, sense_options
+from annotate import HAS_CJK, ambiguous_words, annotate, sense_options
+from gen_data import extract_json_array, extract_json_object, load_seed
 
 if not c.GGUF_FILE.exists():
     raise SystemExit(
@@ -75,12 +76,7 @@ STARTER_POOL = [
 
 
 def _load_seed(path) -> list[str]:
-    if not path.exists():
-        return []
-    return [
-        line.strip() for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.startswith("#")
-    ]
+    return load_seed(path) if path.exists() else []
 
 
 HSK_VOCAB = _load_seed(c.VOCAB_FILE)
@@ -107,10 +103,12 @@ def gen_starters() -> list[str]:
             "要求：口语化、简短（每个不超过25个字）。"
             '只返回一个JSON数组，包含6个字符串，例如 ["…","…","…","…","…","…"]。不要解释。'
         )
+        # 600, not 400: six starters + JSON syntax can crest 400 tokens, and a
+        # truncated array (no closing ]) fails extraction → needless fallback
         out = llm.create_chat_completion(
-            [{"role": "user", "content": prompt}], temperature=0.8, max_tokens=400,
+            [{"role": "user", "content": prompt}], temperature=0.8, max_tokens=600,
         )["choices"][0]["message"]["content"]
-        arr = json.loads(re.search(r"\[.*\]", out, re.DOTALL).group(0))
+        arr = extract_json_array(out)
         starters = [s.strip() for s in arr if isinstance(s, str) and s.strip()][:6]
         if len(starters) >= 4:
             return starters
@@ -400,6 +398,14 @@ APP_JS = """
 
   const KEY = 'hsk5-tutor-deck-v1';   // shared with web/flashcards.html
   const loadDeck = () => { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; } };
+  // Writing to a Gradio-bound textarea needs the native setter + an input
+  // event, or Svelte's store never sees the change — one helper, used by every
+  // programmatic write (ask box, deck mirror, card requests, starter chips).
+  const setNative = (el, value) => {
+    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')
+      .set.call(el, value);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  };
   const toast = (msg) => {
     let t = document.getElementById('collect-toast');
     if (!t) { t = document.createElement('div'); t.id = 'collect-toast'; document.body.appendChild(t); }
@@ -444,10 +450,7 @@ APP_JS = """
   // shows up in #card-res (watched by the observer below).
   const requestExample = (card) => {
     const ta = document.querySelector('#card-req textarea');
-    if (!ta) return;
-    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')
-      .set.call(ta, JSON.stringify({ id: card.id, word: card.front, gloss: card.gloss || '' }));
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    if (ta) setNative(ta, JSON.stringify({ id: card.id, word: card.front, gloss: card.gloss || '' }));
   };
   let lastCardRes = '';
   const checkCardRes = () => {
@@ -574,14 +577,19 @@ APP_JS = """
       .filter(c => c.kind !== 'fix')   // correction fronts are sentences, not target words
       .sort((a, b) => (a.due <= now ? 0 : 1) - (b.due <= now ? 0 : 1))
       .map(c => c.front).slice(0, 30);
-    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')
-      .set.call(ta, JSON.stringify(fronts));
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    setNative(ta, JSON.stringify(fronts));
   };
   window.addEventListener('storage', (e) => {
     if (e.key !== KEY) return;
     renderWordlist();
     syncDeckWords();
+  });
+  // The mirror's real guarantee: re-sync when the ask box gains focus — the
+  // user focuses before typing, giving Gradio's (async) store update seconds
+  // to settle before submit. (A submit-instant sync was tested and loses the
+  // race: the DOM updates but Gradio snapshots its store value first.)
+  document.addEventListener('focusin', (e) => {
+    if (e.target.closest('#ask textarea')) syncDeckWords();
   });
 
   // Browser TTS (same voice logic as web/flashcards.html): each tutor bubble
@@ -610,10 +618,7 @@ APP_JS = """
   let rec = null;
   const setAsk = (text) => {
     const ta = document.querySelector('#ask textarea');
-    if (!ta) return;
-    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')
-      .set.call(ta, text);
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    if (ta) setNative(ta, text);
   };
   const ensureMic = () => {
     if (!SR) return;
@@ -671,9 +676,7 @@ APP_JS = """
     if (!chip) return;
     const ta = document.querySelector('#ask textarea');
     if (!ta) return;
-    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')
-      .set.call(ta, chip.textContent);
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    setNative(ta, chip.textContent);
     ta.focus();
   });
 
@@ -709,11 +712,8 @@ APP_JS = """
       const ta = document.querySelector('#deck-words textarea');
       if (!ta || ta.dataset.synced) return;
       ta.dataset.synced = '1';
-      // repeat after mount settles: a sync dispatched before Gradio's reactive
-      // binding attaches is overwritten by the component's initial value
+      // best-effort early sync; the submit-time capture hook is the guarantee
       syncDeckWords();
-      setTimeout(syncDeckWords, 800);
-      setTimeout(syncDeckWords, 2000);
     };
     new MutationObserver(() => {
       ensureStarters();
@@ -766,12 +766,11 @@ THEME = gr.themes.Base(
 # For the per-bubble TTS button: keep only the Chinese of a bilingual reply
 # (per line-with-CJK, drop the Latin words) so the zh voice doesn't wade
 # through the English translations.
-_HAS_CJK = re.compile(r"[一-鿿]")
 _CJK_CHUNK = re.compile(r"[一-鿿]+[0-9，。！？、；：]*")
 
 
 def chinese_only(text: str) -> str:
-    lines = (line for line in text.split("\n") if _HAS_CJK.search(line))
+    lines = (line for line in text.split("\n") if HAS_CJK.search(line))
     return " ".join("".join(_CJK_CHUNK.findall(line)) for line in lines)
 
 
@@ -809,7 +808,7 @@ def extract_correction(reply: str, wrong: str) -> tuple[str, str] | None:
     sent_end = end_m.start() if end_m else len(reply)
     if _NOT_A_FIX.search(reply[sent_start:sent_end]):
         return None
-    fix_chars = {ch for ch in m.group(1) if _HAS_CJK.match(ch)}
+    fix_chars = {ch for ch in m.group(1) if HAS_CJK.match(ch)}
     if len(fix_chars) < 2 or not wrong:
         return None
     if len(fix_chars & set(wrong)) / len(fix_chars) < 0.6:
@@ -880,7 +879,7 @@ def disambiguate(texts: list[str]) -> dict[str, tuple[list[str], str]]:
         out = llm.create_chat_completion(
             [{"role": "user", "content": prompt}], temperature=0, max_tokens=160,
         )["choices"][0]["message"]["content"]
-        picks = json.loads(re.search(r"\{.*\}", out, re.DOTALL).group(0))
+        picks = extract_json_object(out)
         overrides = {}
         for w, pick in picks.items():
             if w in words and isinstance(pick, (int, str)) and str(pick).isdigit():
@@ -893,16 +892,16 @@ def disambiguate(texts: list[str]) -> dict[str, tuple[list[str], str]]:
         return {}
 
 
-def render_chat(raw: list[dict], tips: list[dict] | None = None) -> str:
+def render_chat(raw: list[dict]) -> str:
     """Build the whole transcript as one self-contained HTML block, annotating every
-    Chinese span (pinyin ruby + hover gloss). `tips` is the per-message list of
-    disambiguation overrides, parallel to `raw`."""
+    Chinese span (pinyin ruby + hover gloss). A message's disambiguation
+    overrides travel ON the message dict (m["tips"]) so they can never
+    misalign; strip_for_llm() removes them before generation."""
     bubbles = []
     for i, m in enumerate(raw):
         u = m["role"] == "user"
         who = "You" if u else "老师 Tutor"
-        ov = tips[i] if tips and i < len(tips) else None
-        msg = _tipped(m["content"], ov)
+        msg = _tipped(m["content"], m.get("tips"))
         spk = "" if u else (
             f'<button class="spk" title="朗读中文 · read the Chinese aloud"'
             f' data-speak="{html.escape(chinese_only(m["content"]), quote=True)}">🔊</button>'
@@ -952,15 +951,20 @@ def render_targets(targets: list[str] | None) -> str:
     return f'<div class="targets-row"><span class="targets-label">目标词 · practice</span>{chips}</div>'
 
 
+def strip_for_llm(raw: list[dict]) -> list[dict]:
+    """History for the model: role/content only — display metadata like the
+    per-message "tips" overrides never reaches the chat template."""
+    return [{"role": m["role"], "content": m["content"]} for m in raw]
+
+
 def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
-            targets: list[str] | None, tips: list[dict]):
+            targets: list[str] | None):
     """user message + raw history → model reply.
-    Returns (chat HTML, raw history, cleared box, targets state, targets bar HTML, tips)."""
+    Returns (chat HTML, raw history, cleared box, targets state, targets bar HTML)."""
     conversational = "聊天" in mode
-    tips = tips or []
     if not user_msg.strip():
-        return (render_chat(raw, tips), raw, "", targets,
-                render_targets(targets if conversational else None), tips)
+        return (render_chat(raw), raw, "", targets,
+                render_targets(targets if conversational else None))
     if conversational:
         if not targets:
             targets = pick_targets(deck_json)
@@ -969,15 +973,17 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
     else:
         system = c.SYSTEM_PROMPT_APP
     raw = raw + [{"role": "user", "content": user_msg}]
-    messages = [{"role": "system", "content": system}] + raw
+    messages = [{"role": "system", "content": system}] + strip_for_llm(raw)
     reply = llm.create_chat_completion(messages, temperature=0.7, max_tokens=512)["choices"][0]["message"]["content"]
     raw = raw + [{"role": "assistant", "content": reply}]
     # one shared override dict for the two new messages (a word appearing in
     # both almost certainly carries the same sense)
     ov = disambiguate([user_msg, reply])
-    tips = tips + [ov, ov]
-    return (render_chat(raw, tips), raw, "", targets,
-            render_targets(targets if conversational else None), tips)
+    if ov:
+        raw[-2]["tips"] = ov
+        raw[-1]["tips"] = ov
+    return (render_chat(raw), raw, "", targets,
+            render_targets(targets if conversational else None))
 
 
 def gen_card_example(req_json: str) -> str:
@@ -1018,9 +1024,8 @@ def flashcards_srcdoc() -> str:
 with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
     gr.HTML(HEADER_HTML)
     with gr.Tab("对话 · chat"):
-        chat_html = gr.HTML(render_chat([], []))
+        chat_html = gr.HTML(render_chat([]))
         raw_state = gr.State([])
-        tips_state = gr.State([])
         targets_state = gr.State(None)
         targets_bar = gr.HTML("")
         mode = gr.Radio(
@@ -1046,11 +1051,11 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
         # sample from STARTER_POOL on every page load and wires the clicks.
         gr.HTML('<div class="starters-row" id="starters"></div>')
 
-        msg.submit(respond, [msg, raw_state, mode, deck_words, targets_state, tips_state],
-                   [chat_html, raw_state, msg, targets_state, targets_bar, tips_state])
+        msg.submit(respond, [msg, raw_state, mode, deck_words, targets_state],
+                   [chat_html, raw_state, msg, targets_state, targets_bar])
         clear = gr.Button("清空 · clear", elem_id="clear-btn")
-        clear.click(lambda: (render_chat([], []), [], "", None, "", []), None,
-                    [chat_html, raw_state, msg, targets_state, targets_bar, tips_state])
+        clear.click(lambda: (render_chat([]), [], "", None, ""), None,
+                    [chat_html, raw_state, msg, targets_state, targets_bar])
     with gr.Tab("卡片 · flashcards"):
         gr.HTML(flashcards_srcdoc())
     with gr.Tab("词表 · word list"):

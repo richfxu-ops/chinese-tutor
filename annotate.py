@@ -26,9 +26,11 @@ from pypinyin import Style, pinyin
 
 CEDICT_FILE = Path(__file__).resolve().parent / "cedict_ts.u8"
 
-# One or more CJK ideographs in a row.
+# One or more CJK ideographs in a row. HAS_CJK is public: app.py shares it
+# (TTS text extraction, correction-chip gating) so the two files can't drift
+# on what counts as Chinese.
 _CJK_RUN = re.compile(r"[一-鿿]+")
-_HAS_CJK = re.compile(r"[一-鿿]")
+HAS_CJK = re.compile(r"[一-鿿]")
 
 
 # Entry: (pinyin key, is_proper, [glosses], original spaced reading e.g. "di4 dao5")
@@ -159,7 +161,7 @@ def ambiguous_words(text: str) -> list[str]:
             if (
                 token not in out
                 and token not in _SKIP_DISAMBIG
-                and _HAS_CJK.search(token)
+                and HAS_CJK.search(token)
                 and len(_meaningful_entries(token)) >= 2
             ):
                 out.append(token)
@@ -209,7 +211,7 @@ def _annotate_cjk_run(run: str, cedict: dict[str, list[Entry]],
     """Segment a CJK run and annotate each token (punctuation passes through)."""
     parts = []
     for token in jieba.cut(run):
-        if _HAS_CJK.search(token):
+        if HAS_CJK.search(token):
             parts.append(_annotate_word(token, cedict, overrides))
         else:
             parts.append(html.escape(token))
