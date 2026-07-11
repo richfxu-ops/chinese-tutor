@@ -75,6 +75,8 @@ STARTER_POOL = [
 
 
 def _load_seed(path) -> list[str]:
+    if not path.exists():
+        return []
     return [
         line.strip() for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip() and not line.startswith("#")
@@ -87,22 +89,24 @@ HSK_GRAMMAR = _load_seed(c.GRAMMAR_FILE)
 
 def gen_starters() -> list[str]:
     """Model-written starter chips, one per task type, seeded with random vocab
-    and grammar so every launch is a new set. Falls back to STARTER_POOL."""
-    words = random.sample(HSK_VOCAB, 4)
-    grammar = random.choice(HSK_GRAMMAR)
-    prompt = (
-        "为一个HSK5水平的学生写6个开场问题，模拟学生问中文老师时会说的话，每种一个。"
-        "每一条都必须是学生对老师的【请求或提问】，不能是回答或对话本身：\n"
-        f"1. 问“{words[0]}”是什么意思\n"
-        f"2. 请老师用“{words[1]}”造句\n"
-        f"3. 格式：“这个句子对吗？……”——句子由你编，含一个典型的学习者语法错误，用上“{words[2]}”\n"
-        "4. 问一个日常英文表达用中文怎么说，格式：“How do I say ‘…’ in Chinese?”（选一个不能直译的表达）\n"
-        f"5. 格式：“给我一段关于…的对话”，场景跟“{words[3]}”有关\n"
-        f"6. 问“{grammar}”这个语法怎么用\n"
-        "要求：口语化、简短（每个不超过25个字）。"
-        '只返回一个JSON数组，包含6个字符串，例如 ["…","…","…","…","…","…"]。不要解释。'
-    )
+    and grammar so every launch is a new set. Falls back to STARTER_POOL —
+    for ANY failure, including missing/short seed files, so this can never
+    block launch (everything lives inside the try)."""
     try:
+        words = random.sample(HSK_VOCAB, 4)
+        grammar = random.choice(HSK_GRAMMAR)
+        prompt = (
+            "为一个HSK5水平的学生写6个开场问题，模拟学生问中文老师时会说的话，每种一个。"
+            "每一条都必须是学生对老师的【请求或提问】，不能是回答或对话本身：\n"
+            f"1. 问“{words[0]}”是什么意思\n"
+            f"2. 请老师用“{words[1]}”造句\n"
+            f"3. 格式：“这个句子对吗？……”——句子由你编，含一个典型的学习者语法错误，用上“{words[2]}”\n"
+            "4. 问一个日常英文表达用中文怎么说，格式：“How do I say ‘…’ in Chinese?”（选一个不能直译的表达）\n"
+            f"5. 格式：“给我一段关于…的对话”，场景跟“{words[3]}”有关\n"
+            f"6. 问“{grammar}”这个语法怎么用\n"
+            "要求：口语化、简短（每个不超过25个字）。"
+            '只返回一个JSON数组，包含6个字符串，例如 ["…","…","…","…","…","…"]。不要解释。'
+        )
         out = llm.create_chat_completion(
             [{"role": "user", "content": prompt}], temperature=0.8, max_tokens=400,
         )["choices"][0]["message"]["content"]
@@ -112,7 +116,7 @@ def gen_starters() -> list[str]:
             return starters
         raise ValueError(f"only {len(starters)} usable starters in: {out[:120]!r}")
     except Exception as e:  # noqa: BLE001 — starters are decoration, never block launch
-        print(f"starters: model generation failed ({e}); using the fallback pool", flush=True)
+        print(f"starters: generation failed ({e}); using the fallback pool", flush=True)
     return random.sample(STARTER_POOL, 6)
 
 
@@ -774,10 +778,14 @@ def chinese_only(text: str) -> str:
 # A tutor correction: 应该说“正确的句子”，因为解释… (the trained shape) or
 # 解释…，所以要说“正确的句子”。 The corrected sentence is the quoted group; the
 # explanation is the rest of the sentence around the match (either side), plus
-# the following sentence when it's the (mostly-ASCII) English rule. The (?<!不)
-# guard skips 不要说“错的” so we never capture the wrong version as the fix.
-_FIX_RE = re.compile(r"(?<!不)(?:应该|要)\s*说\s*[“\"]([^”\"]+)[”\"]")
+# the following sentence when it's the (mostly-ASCII) English rule. The
+# (?<![不别]) guard skips 不要说/别说“错的” so we never capture the wrong
+# version as the fix.
+_FIX_RE = re.compile(r"(?<![不别])(?:应该|要)\s*说\s*[“\"]([^”\"]+)[”\"]")
 _SENT_END = re.compile(r"[。！？!?.]")
+# Praise/agreement in the same sentence means the quote is NOT a correction
+# (你说得对，应该说“…”也可以) — no chip.
+_NOT_A_FIX = re.compile(r"说得对|说得很好|没问题|没有错|是对的|很自然|用得很好")
 
 
 def _mostly_ascii(s: str) -> bool:
@@ -785,8 +793,13 @@ def _mostly_ascii(s: str) -> bool:
     return bool(letters) and sum(ch.isascii() for ch in letters) / len(letters) > 0.6
 
 
-def extract_correction(reply: str) -> tuple[str, str] | None:
-    """(corrected sentence, explanation) if the reply contains a correction."""
+def extract_correction(reply: str, wrong: str) -> tuple[str, str] | None:
+    """(corrected sentence, explanation) if the reply corrects `wrong`, the
+    student's previous message.
+
+    Guards against false chips on benign 应该说/要说 quoting: a real correction
+    REVISES the student's sentence, so the quoted fix must be built mostly from
+    the student's own characters, and the sentence must not be praise."""
     m = _FIX_RE.search(reply)
     if not m:
         return None
@@ -794,6 +807,13 @@ def extract_correction(reply: str) -> tuple[str, str] | None:
     sent_start = ends[-1] if ends else 0
     end_m = _SENT_END.search(reply, m.end())
     sent_end = end_m.start() if end_m else len(reply)
+    if _NOT_A_FIX.search(reply[sent_start:sent_end]):
+        return None
+    fix_chars = {ch for ch in m.group(1) if _HAS_CJK.match(ch)}
+    if len(fix_chars) < 2 or not wrong:
+        return None
+    if len(fix_chars & set(wrong)) / len(fix_chars) < 0.6:
+        return None
     pre = reply[sent_start:m.start()].strip().strip("，、： ")
     if len(pre) <= 3:   # a bare subject ("你"/"这里"), not an explanation
         pre = ""
@@ -819,6 +839,14 @@ def extract_correction(reply: str) -> tuple[str, str] | None:
 # sense actually used. Failures fall back silently to the dictionary tips.
 # --------------------------------------------------------------------------- #
 _SENTENCE_SPLIT = re.compile(r"[。！？!?\n]")
+
+
+def _tipped(text: str, ov: dict[str, tuple[list[str], str]] | None = None) -> str:
+    """annotate() for in-app rendering: the native `title` tooltip (right for
+    the standalone docs/ pages) becomes our styled CSS tooltip's data-tip.
+    Safe: message text is html-escaped, so ` title="` can only come from
+    annotate()'s own .hz spans."""
+    return annotate(text, ov).replace(' title="', ' data-tip="')
 
 
 def _sentence_around(text: str, word: str) -> str:
@@ -873,12 +901,8 @@ def render_chat(raw: list[dict], tips: list[dict] | None = None) -> str:
     for i, m in enumerate(raw):
         u = m["role"] == "user"
         who = "You" if u else "老师 Tutor"
-        # annotate() emits native `title` tooltips (right for the standalone docs/
-        # pages); in-app we show the gloss via the CSS tooltip instead, so rename
-        # the attribute. Safe: message text is html-escaped, so ` title="` can
-        # only come from annotate()'s own .hz spans.
         ov = tips[i] if tips and i < len(tips) else None
-        msg = annotate(m["content"], ov).replace(' title="', ' data-tip="')
+        msg = _tipped(m["content"], ov)
         spk = "" if u else (
             f'<button class="spk" title="朗读中文 · read the Chinese aloud"'
             f' data-speak="{html.escape(chinese_only(m["content"]), quote=True)}">🔊</button>'
@@ -888,7 +912,7 @@ def render_chat(raw: list[dict], tips: list[dict] | None = None) -> str:
         # fix + rule). APP_JS handles the click; the data- attrs carry the card.
         chip = ""
         if not u and i and raw[i - 1]["role"] == "user":
-            fix = extract_correction(m["content"])
+            fix = extract_correction(m["content"], raw[i - 1]["content"])
             if fix:
                 chip = (
                     f'<button class="fix-collect"'
@@ -924,10 +948,7 @@ def pick_targets(deck_json: str) -> list[str]:
 def render_targets(targets: list[str] | None) -> str:
     if not targets:
         return ""
-    chips = "".join(
-        f'<span class="tg">{annotate(w).replace(" title=\"", " data-tip=\"")}</span>'
-        for w in targets
-    )
+    chips = "".join(f'<span class="tg">{_tipped(w)}</span>' for w in targets)
     return f'<div class="targets-row"><span class="targets-label">目标词 · practice</span>{chips}</div>'
 
 
@@ -968,7 +989,7 @@ def gen_card_example(req_json: str) -> str:
     llm/queue as chat, so it simply waits its turn behind a generation."""
     try:
         req = json.loads(req_json)
-        word, gloss = req["word"], req.get("gloss", "")
+        card_id, word, gloss = req["id"], req["word"], req.get("gloss", "")
     except (json.JSONDecodeError, KeyError, TypeError):
         return ""
     meaning = f"（意思：{gloss}）" if gloss else ""
@@ -979,10 +1000,11 @@ def gen_card_example(req_json: str) -> str:
     out = llm.create_chat_completion(
         [{"role": "user", "content": prompt}], temperature=0.7, max_tokens=80,
     )["choices"][0]["message"]["content"].strip().strip('"“”')
-    example = out.splitlines()[0].strip()[:120]
-    if word not in example:      # model wandered off — keep the scraped example
+    lines = [line.strip() for line in out.splitlines() if line.strip()]
+    example = lines[0][:120] if lines else ""
+    if not example or word not in example:   # empty or wandered off — keep the scraped example
         return ""
-    return html.escape(json.dumps({"id": req["id"], "example": example}, ensure_ascii=False))
+    return html.escape(json.dumps({"id": card_id, "example": example}, ensure_ascii=False))
 
 
 def flashcards_srcdoc() -> str:

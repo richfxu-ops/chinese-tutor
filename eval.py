@@ -108,11 +108,21 @@ def judge(results: list[dict]) -> None:
     per_axis = {ax: {"base": 0.0, "tuned": 0.0} for ax in RUBRIC_AXES}
 
     for i, r in enumerate(results, 1):
+        # The conversation task is Chinese-only BY DESIGN (its system prompt
+        # forbids translations) — judging it against the bilingual Q&A format
+        # would penalize exactly the trained behavior.
+        fmt = (
+            "format = a natural conversational turn: simplified Chinese only "
+            "(brief English allowed solely inside a correction explanation), "
+            "short, ends with a question"
+            if r["task"] == "conversation"
+            else "format = fully bilingual (Chinese + English), clean, no per-character pinyin"
+        )
         prompt = (
             "You are grading two Chinese-tutor answers to the same student request. "
             f"Score each 1–5 on these axes: {axes}. "
             "level_fit = stays at/below HSK-5 and scaffolds; correctness = the Chinese is right; "
-            "task = did what was asked; format = fully bilingual (Chinese + English), clean, no per-character pinyin.\n\n"
+            f"task = did what was asked; {fmt}.\n\n"
             f"STUDENT: {r['user']}\n\nANSWER_A (base):\n{r['base']}\n\nANSWER_B (tuned):\n{r['tuned']}\n\n"
             'Return ONLY JSON: {"A": {axis: score,...}, "B": {axis: score,...}, "winner": "A"|"B"|"tie"}.'
         )
