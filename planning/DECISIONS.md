@@ -2,6 +2,11 @@
 
 > Dated log of notable choices and *why*, so rationale isn't lost. Newest first.
 
+## 2026-07-11 — 聊天 mode is Chinese-only for the MODEL, both directions
+- **Decision:** In conversation mode, an English student message is translated to Chinese BEFORE generation and the model receives the Chinese as the user turn (the bubble shows the typed English with the annotated Chinese beneath — m["display"] vs m["content"]). Replies without a correction get translation drift stripped (standalone English lines, trailing English runs) from display AND history; replies WITH a correction are untouched since their English rule explanation is legitimate.
+- **Why:** Feeding English to the conversation-trained tutor made it drift into Q&A behaviors — translating the student, "evaluating" a translation nobody asked about, appending English translations. Keeping the model's view of the conversation 100% Chinese removes the trigger; the enforcement pass catches residual drift and keeps it out of the context so it can't self-reinforce.
+- **Implications:** English input in 聊天 costs one extra pre-generation translation call (~2s before first token). The correction-exemption means a drifted translation co-occurring with a correction survives — acceptable, rare.
+
 ## 2026-07-11 — Streaming: plain text live, reading layer swaps in at the end; one lock owns the model
 - **Decision:** respond() is a generator: tokens stream into a PLAIN bubble (blinking cursor), then a 加注中 pass runs the model-assisted annotation (sense picks, translation fills) and the final yield swaps in the annotated transcript. The reading layer is never run on partial text — jieba/pypinyin would misparse half-generated words. render_chat(unclosed=True) is the structural hook for the live bubble (no string surgery on the closed form). ALL model calls go through `generate()`/_LLM_LOCK: Gradio 6 gives each event listener its own concurrency queue, so a card-example request can otherwise hit the non-thread-safe Llama mid-stream — the review found this as a crash-class race.
 - **Why:** Perceived latency: first text within ~1s instead of a 10–30s blank wait. The lock, not per-event concurrency settings, is the correctness boundary because the model is one shared instance.

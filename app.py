@@ -1123,10 +1123,13 @@ def _render_msg(m: dict, tutor: bool) -> str:
     line (tutor lines, and Chinese fills anywhere), plus any filled-in
     translations under their lines. Fills go through the reading layer too —
     an English fill passes through untouched, a Chinese one (the translation
-    of the student's English prompt) gets ruby + glosses + click-to-collect."""
+    of the student's English prompt) gets ruby + glosses + click-to-collect.
+    m["display"], when present, is what the student actually typed — shown
+    instead of m["content"] (which is what the MODEL sees, e.g. the Chinese
+    translation of an English prompt in conversation mode)."""
     ov, fills = m.get("tips"), m.get("fills") or {}
     parts = []
-    for i, line in enumerate(m["content"].split("\n")):
+    for i, line in enumerate(m.get("display", m["content"]).split("\n")):
         h = _tipped(line, ov)
         if tutor and HAS_CJK.search(line):
             h += _spk(line)
@@ -1217,6 +1220,27 @@ def strip_for_llm(raw: list[dict]) -> list[dict]:
     return [{"role": m["role"], "content": m["content"]} for m in raw]
 
 
+def enforce_chinese_reply(reply: str) -> str:
+    """聊天-mode contract: English belongs ONLY inside a correction. When a
+    reply contains no correction, translation drift (a standalone English
+    line, or an English run glued to the end of a Chinese line) is stripped —
+    from history too, so drift doesn't self-reinforce as fake context. A reply
+    WITH a correction is left untouched: its English rule explanation is
+    legitimate and too entangled to edit safely."""
+    if _FIX_RE.search(reply):
+        return reply
+    kept = []
+    for line in reply.split("\n"):
+        s = line.strip()
+        if s and _mostly_ascii(s) and not HAS_CJK.search(s):
+            continue                                    # standalone translation line
+        if HAS_CJK.search(s):
+            line = _TRAILING_EN.sub("", line.rstrip()) or line
+        kept.append(line)
+    out = "\n".join(kept).strip()
+    return out or reply
+
+
 def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
             targets: list[str] | None, review_only: bool):
     """user message + raw history → model reply, STREAMED.
@@ -1238,7 +1262,20 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
         system = c.conversation_system(targets)
     else:
         system = c.SYSTEM_PROMPT_APP
-    raw = raw + [{"role": "user", "content": user_msg}]
+    user_turn = {"role": "user", "content": user_msg}
+    english_prompt = _mostly_ascii(user_msg) and len(user_msg.strip()) >= 8
+    if conversational and english_prompt:
+        # the conversation must stay Chinese for the MODEL — English input makes
+        # the tutor drift into translating/evaluating instead of conversing. The
+        # student's English is translated first and the model sees the Chinese;
+        # the bubble shows what they typed, with the annotated Chinese beneath.
+        zh = translate_user_to_chinese(user_msg)
+        if zh:
+            msg_lines = user_msg.split("\n")
+            idx = max((i for i, l in enumerate(msg_lines) if l.strip()), default=0)
+            user_turn = {"role": "user", "content": zh, "display": user_msg,
+                         "fills": {idx: zh}}
+    raw = raw + [user_turn]
     messages = [{"role": "system", "content": system}] + strip_for_llm(raw)
 
     # history annotated once; the in-progress reply rides in a plain bubble
@@ -1277,11 +1314,15 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
         )
         yield (err, raw[:-1], user_msg, targets, bar())
         return
+    if conversational:
+        reply = enforce_chinese_reply(reply)
     raw = raw + [{"role": "assistant", "content": reply}]
 
-    # reading-layer pass: sense picks, translation fills, prompt translation
+    # reading-layer pass: sense picks, translation fills, prompt translation.
+    # disambiguate sees what the transcript shows — raw[-2]["content"] is the
+    # Chinese translation when the student typed English in 聊天 mode.
     yield (with_stream_bubble(reply, note="加注中 annotating"), raw, "", targets, bar())
-    ov = disambiguate([user_msg, reply])
+    ov = disambiguate([raw[-2]["content"], reply])
     if ov:
         raw[-2]["tips"] = ov
         raw[-1]["tips"] = ov
@@ -1289,14 +1330,15 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
         fills = fill_translations(reply)
         if fills:
             raw[-1]["fills"] = fills
-    # an English prompt gets its Chinese under the student's own bubble —
-    # keyed to the last NON-EMPTY line (a trailing newline must not detach it)
-    if _mostly_ascii(user_msg) and len(user_msg.strip()) >= 8:
-        zh = translate_user_to_chinese(user_msg)
-        if zh:
-            msg_lines = user_msg.split("\n")
-            idx = max((i for i, l in enumerate(msg_lines) if l.strip()), default=0)
-            raw[-2]["fills"] = {idx: zh}
+        # a Q&A English prompt gets its Chinese under the student's bubble —
+        # keyed to the last NON-EMPTY line (a trailing newline must not detach
+        # it). In 聊天 mode this already happened before generation.
+        if english_prompt:
+            zh = translate_user_to_chinese(user_msg)
+            if zh:
+                msg_lines = user_msg.split("\n")
+                idx = max((i for i, l in enumerate(msg_lines) if l.strip()), default=0)
+                raw[-2]["fills"] = {idx: zh}
     yield (render_chat(raw), raw, "", targets, bar())
 
 
