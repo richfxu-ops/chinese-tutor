@@ -11,10 +11,21 @@
 - [ ] (P3) v2 roadmap: voice chat — speak your Chinese, Whisper-class ASR #roadmap
 
 ## Next
+- [x] RUN `python gen_data.py` (2026-07-12): regenerated 900 train / 100 eval with the new mode mix. 280/280 batches, ZERO drops. correct_sentence modes error 70 / correct 65 / polish 35 / ambiguous 10 (matches 40/35/20/5 target); modes present in both splits; content spot-checks clean (no invented errors). Old data backed up to data/*.pre-14b-bak. #data #run
+- [ ] (P1) Retrain on Colab A100 (14B QLoRA) → merge → GGUF (~9GB; back up the current 7B .gguf first) → swap into outputs/ #train #run
+- [x] Re-run qa_harness against the 14B (2026-07-12): false corrections ~55%→~0%, recall 8/8, fixes 8/8, driving 36/37; contracts intact; ~2.2× latency. Wrong-RULE issue persists (~5/8, capability-limited). See DECISIONS 2026-07-12. #eval
+- [ ] (P3) Wrong-rule follow-up (optional): corrected sentences are reliable but ~5/8 rule EXPLANATIONS are wrong (见面/结婚 transitivity backwards, self-contradiction). Options: shorten/soften rule text in correction data, or targeted rule-accuracy data iteration #data
+- [ ] (P3) Watch 14B serve latency (3.9s mean × up-to-3 calls/turn); escape hatch = 14B for main gen, 7B for auxiliary (disambiguation/fills) #ship
+- [ ] (P3) Serve: correction chip fires on false corrections (overlap gate can't tell a fabricated fix of a correct sentence from a real one) — mitigate or gate on a "was there actually an error" signal; also no chip in Q&A 修改后 format #ship
+- [ ] (P3) Optional: collapse the SYSTEM_PROMPT / SYSTEM_PROMPT_APP train-serve split (deferred from the redesign to keep the retrain's variables focused — DECISIONS 2026-07-11) #data
+- [ ] (P3) Optional: stratified correct-sentence eval probes in eval.py (they already flow into eval.jsonl via the split) #eval
 - [ ] (P2) Fill README before/after from outputs/eval_report.md #ship #M3
 - [ ] (P3) Data iteration: enforce English-explanation compliance in conversation corrections (~1/5 slip through, model reproduces it) #data
 
 ## In Progress
+- [x] Reading practice tab (2026-07-12): model writes an HSK-5 passage + 3 comprehension questions on a topic (blank = random CONV_TOPIC), rendered through the reading layer (pinyin/hover/click-to-collect), English translation shown, per-passage 🔊, reveal-answer buttons. Rendering verified w/o model; end-to-end model gen pending a live check. app.py only. #ship
+- [x] gen_data.py + config.py redesign (2026-07-11): correct_sentence response-type modes (error .40 / correct .35 / polish .20 / ambiguous .05), rule-consistency instruction, error-free conversations (25%), target-word invitation bias, BASE_MODEL → Qwen2.5-14B. Code done; dry-run + offline record-path tests pass. Regen + retrain pending above. #data #train
+- [x] Live smoke test (2026-07-11): all 4 correction modes verified against the teacher; fixed GEN_MAX_TOKENS 4096→8192 (ambiguous replies truncated + dropped otherwise) #data #run
 
 ## Done
 - [x] Initialize repository + feature branch (feat/hsk5-tutor)
