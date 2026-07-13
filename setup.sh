@@ -12,7 +12,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # Where the model lives (override with HF_REPO=user/repo ./setup.sh)
-HF_REPO="${HF_REPO:-richfxu-ops/hsk5-tutor-14b-gguf}"
+HF_REPO="${HF_REPO:-richfxu/hsk5-tutor-14b-gguf}"
 GGUF="outputs/hsk5-tutor-q4_k_m.gguf"
 GGUF_URL="https://huggingface.co/${HF_REPO}/resolve/main/hsk5-tutor-q4_k_m.gguf"
 MIN_GGUF_BYTES=8000000000   # a complete 14B Q4 is ~9 GB; anything smaller is a truncated download
