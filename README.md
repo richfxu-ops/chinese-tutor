@@ -32,6 +32,25 @@ seed lists ──▶ gen_data.py ──▶ train.py ──▶ eval.py ──▶ 
 
 ## Quickstart
 
+### Just run it (no training needed)
+
+Requirements: an **Apple Silicon Mac with 16 GB+ RAM**, python3, and ~10 GB of disk.
+
+```bash
+git clone https://github.com/richfxu-ops/chinese-tutor.git
+cd chinese-tutor
+./setup.sh          # venv + deps + dictionary + stroke data + the model (~9 GB, resumable)
+```
+
+Then double-click `start-tutor.command` (or run it from the terminal). First launch
+takes ~20s while the model loads. The neural 🔊 voices need internet; everything
+else runs fully offline.
+
+> If `pip` has no prebuilt `llama-cpp-python` wheel for your Python version it
+> compiles one, which needs the Xcode Command Line Tools: `xcode-select --install`.
+
+Building the model yourself instead? That's the pipeline below.
+
 ### 1. Generate data (local, needs an Anthropic key)
 ```bash
 pip install -r requirements.txt

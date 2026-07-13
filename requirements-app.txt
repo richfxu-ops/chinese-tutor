@@ -1,0 +1,12 @@
+# Serve-only deps — everything a fresh machine needs to RUN the tutor
+# (setup.sh installs from this). The full dev set — data generation, eval,
+# local merge — lives in requirements.txt; training deps in requirements-train.txt.
+gradio>=5.0            # Textbox(submit_btn=...) needs 5.0+
+# Local serving of the quantized model (ships Metal wheels for Apple Silicon)
+llama-cpp-python>=0.3.0
+# Reading layer (app-side pinyin + hover gloss)
+pypinyin>=0.53
+jieba>=0.42
+certifi>=2024.0        # get_cedict.py TLS on python.org macOS builds
+# Neural TTS for the 🔊 buttons (needs internet; falls back to the browser voice)
+edge-tts>=6.1
