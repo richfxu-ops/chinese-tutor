@@ -1050,14 +1050,12 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
         raw_state = gr.State([])
         targets_state = gr.State(None)
         targets_bar = gr.HTML("")
+        # controls row 1: 模式 pills · 水平 pills · 复习 checkbox (labels + inline
+        # layout come from #mode-row CSS; the voice/speed row sits below it)
         with gr.Row(elem_id="mode-row"):
             mode = gr.Radio(
                 ["问答 · Q&A", "聊天 · conversation"], value="问答 · Q&A",
                 show_label=False, elem_id="mode", container=False,
-            )
-            review_mode = gr.Checkbox(
-                False, label="复习模式 · target only due cards", elem_id="review-mode",
-                container=False,
             )
             # HSK level: 5 is the trained level; 4/6 steer the prompts (and pick
             # their own seed lists). An event input to respond/gen_passage/the
@@ -1065,6 +1063,10 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
             level_pick = gr.Radio(
                 ["HSK 4", "HSK 5", "HSK 6"], value="HSK 5",
                 show_label=False, elem_id="level", container=False, interactive=True,
+            )
+            review_mode = gr.Checkbox(
+                False, label="复习模式 · target only due cards", elem_id="review-mode",
+                container=False,
             )
         # 🔊 neural-voice pick on its OWN row — kept out of the crowded mode-row so
         # both pills stay clickable. synth_tts reads the selection (wired below);

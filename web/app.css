@@ -193,7 +193,22 @@ button[role="tab"][aria-selected="true"] {
 .targets-row .tg { font-family:var(--hanzi-kai); color:var(--ink); }
 
 /* ---------- mode toggle ---------- */
-#mode-row { align-items:center; gap:1rem; flex-wrap:wrap; }
+/* controls row 1: [模式 pills] [水平 pills] ……… [复习 checkbox]. Gradio row
+   children default to full-width/flex-grow, which stacked the mode pills
+   vertically and scattered the rest — same fix as #voice-row: size to content. */
+#mode-row { align-items:center; gap:1.4rem; flex-wrap:wrap;
+            justify-content:flex-start; margin:.15rem 0 0; }
+#mode-row > * { flex:0 0 auto !important; width:auto !important; min-width:0 !important;
+                margin:0 !important; }   /* Gradio's .auto-margin centers wrapped children */
+/* each pill group is one inline flex line: small mono label + its pills */
+#mode, #level { display:flex !important; align-items:center; gap:.55rem; }
+#mode .wrap, #level .wrap { display:flex; flex-direction:row; flex-wrap:nowrap; gap:.4rem; }
+#mode::before, #level::before {
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.6rem;
+  letter-spacing:.13em; text-transform:uppercase; color:var(--ink-soft); flex:0 0 auto;
+}
+#mode::before { content:"模式 · mode"; }
+#level::before { content:"水平 · level"; }
 /* strip Gradio's block chrome: no border/padding, size to the label text */
 #review-mode { flex:0 0 auto !important; width:auto !important;
                min-width:fit-content !important; border:none !important;
