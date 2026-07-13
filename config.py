@@ -38,9 +38,10 @@ BASE_MODEL = "Qwen/Qwen2.5-14B-Instruct"      # student model we fine-tune (7B �
 TEACHER_MODEL = "claude-sonnet-5"             # generates the synthetic data
 HSK_LEVEL = 5
 
-# The tutor persona. Used as the `system` message in EVERY training example and
-# again at inference in app.py — so the model is trained on the exact behaviour
-# we ask of it at serve time. Keep them identical.
+# The tutor persona. Used as the `system` message in EVERY training example.
+# At inference app.py serves SYSTEM_PROMPT_APP — this prompt plus two serve-only
+# lines (a deliberate, documented divergence; see SYSTEM_PROMPT_APP below and
+# DECISIONS.md 2026-07-10).
 #
 # Note on pinyin: we deliberately DON'T ask the model to emit pinyin. The app's
 # reading layer (pypinyin) renders pinyin over every character deterministically,
@@ -267,12 +268,12 @@ class TrainConfig:
     # prompt + up to CONV_MAX_CHARS of turns ≈ 1.1k tokens with Qwen's tokenizer.
     # Truncation would cut the final assistant turn, which is where the loss is.
     max_seq_len: int = 1280
-    epochs: int = 2            # enough for SFT on ~800 examples; keeps the T4 run shorter
+    epochs: int = 2            # enough for SFT on ~1k examples without overfitting
     lr: float = 2e-4
-    # Micro-batch of 2 fits a 16GB T4 — the loss logits for a 152k-vocab 7B are
-    # large on long-sequence batches, so batch 4 OOMs. Grad accumulation keeps the
-    # effective batch at 16 (same training dynamics). Bump per_device_batch up on a
-    # bigger GPU (A100/L4). train.py also enables gradient checkpointing.
+    # Sized in the 7B/T4 era (batch 4 OOMed — loss logits for a 152k vocab are
+    # large on long-sequence batches) and kept for the 14B, which trains on an
+    # A100: batch 2 × grad-accum 8 = effective batch 16 works on both.
+    # train.py also enables gradient checkpointing.
     per_device_batch_size: int = 2
     grad_accum_steps: int = 8          # effective batch 16
     warmup_ratio: float = 0.03

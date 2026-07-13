@@ -1,4 +1,4 @@
-"""Before/after eval: the base model (config.BASE_MODEL, Qwen2.5-14B) vs. the QLoRA-tuned tutor.
+"""Before/after eval: the base model (config.BASE_MODEL) vs. the QLoRA-tuned tutor.
 
 Runs on the same CUDA GPU you trained on (Colab). It loads the base once, attaches
 the trained adapter, and generates on the held-out eval prompts with the adapter
@@ -90,6 +90,7 @@ def write_report(results: list[dict]) -> None:
             f"**User:** {r['user']}\n",
             f"**Base (before):**\n\n> {r['base'].replace(chr(10), chr(10) + '> ')}\n",
             f"**Tuned (after):**\n\n> {r['tuned'].replace(chr(10), chr(10) + '> ')}\n",
+            f"**Reference (training gold):**\n\n> {r['gold'].replace(chr(10), chr(10) + '> ')}\n",
             "---\n",
         ]
     path.write_text("\n".join(lines), encoding="utf-8")

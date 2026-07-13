@@ -53,9 +53,7 @@
     deck.push(card);
     localStorage.setItem(KEY, JSON.stringify(deck));
     toast('已收藏 “' + front + '” · added to your deck (' + deck.length + ')');
-    renderWordlist();
-    syncDeckWords();
-    pushDeckFile();
+    afterDeckChange();
     requestExample(card);
   });
 
@@ -76,6 +74,10 @@
       if (ta) setNative(ta, localStorage.getItem(KEY) || '[]');
     }, 600);
   };
+  // Everything a full deck change needs: re-render the word list, refresh the
+  // conversation-targets mirror, persist to data/deck.json. Sites that
+  // deliberately skip a step (restore / card-fill / fix-card) say why inline.
+  const afterDeckChange = () => { renderWordlist(); syncDeckWords(); pushDeckFile(); };
   // Restore: a browser with NO deck key at all (fresh browser / cleared site
   // data) adopts the server file. An empty-but-present deck is respected —
   // deleting your last card doesn't resurrect it on reload.
@@ -90,7 +92,7 @@
       if (Array.isArray(JSON.parse(text))) {
         localStorage.setItem(KEY, text);
         renderWordlist();
-        syncDeckWords();
+        syncDeckWords();   // no pushDeckFile: this deck just CAME from the file
       }
     } catch {}
   };
@@ -120,7 +122,7 @@
     localStorage.setItem(KEY, JSON.stringify(deck));
     toast(got.join('和') + '写好了 · card filled in for “' + card.front + '”');
     renderWordlist();
-    pushDeckFile();
+    pushDeckFile();   // no syncDeckWords: fills change gloss/example, never word fronts
   };
 
   // Correction cards: the server tags correctable tutor bubbles with a
@@ -144,7 +146,7 @@
     chip.classList.add('saved');
     chip.textContent = '✓ 已收藏 · saved';
     renderWordlist();
-    pushDeckFile();
+    pushDeckFile();   // no syncDeckWords: fix cards are excluded from the targets mirror
   });
 
   // ---- word-list tab: table of the collected deck, with per-row removal.
@@ -238,9 +240,7 @@
     const card = deck.find(c => c.id === btn.dataset.fid);
     localStorage.setItem(KEY, JSON.stringify(deck.filter(c => c.id !== btn.dataset.fid)));
     toast('已移除 “' + (card ? card.front : '') + '” · removed');
-    renderWordlist();
-    syncDeckWords();
-    pushDeckFile();
+    afterDeckChange();
   });
 
   // Mirror the deck's word fronts (due-first, capped) into the hidden #deck-words
@@ -257,9 +257,7 @@
   };
   window.addEventListener('storage', (e) => {
     if (e.key !== KEY) return;
-    renderWordlist();
-    syncDeckWords();
-    pushDeckFile();
+    afterDeckChange();
   });
   // The mirror's real guarantee: re-sync when the ask box gains focus — the
   // user focuses before typing, giving Gradio's (async) store update seconds
@@ -403,9 +401,11 @@
     });
   };
 
-  // Starter chips: a fresh random six from the pool on every page load; the ⟲
-  // button asks the server to write a genuinely new set (fresh random seeds).
-  const STARTER_POOL = __STARTERS__;
+  // Starter chips: a fresh random six on every page load; the ⟲ button asks the
+  // server to write a genuinely new set (fresh random seeds).
+  // SERVER_STARTERS is the model-written set injected at startup (app.py fills
+  // __STARTERS__) — NOT app.py's STARTER_POOL, which is only its fallback list.
+  const SERVER_STARTERS = __STARTERS__;
   const renderStarters = (row, picks) => {
     const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
     row.innerHTML = '<span class="starters-label">试一试 · try one</span>'
@@ -416,7 +416,7 @@
     const row = document.getElementById('starters');
     if (!row || row.dataset.filled) return;
     row.dataset.filled = '1';
-    renderStarters(row, [...STARTER_POOL].sort(() => Math.random() - 0.5).slice(0, 6));
+    renderStarters(row, [...SERVER_STARTERS].sort(() => Math.random() - 0.5).slice(0, 6));
   };
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('.starter-refresh');

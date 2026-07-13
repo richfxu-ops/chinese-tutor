@@ -15,6 +15,7 @@ cd "$(dirname "$0")"
 HF_REPO="${HF_REPO:-richfxu-ops/hsk5-tutor-14b-gguf}"
 GGUF="outputs/hsk5-tutor-q4_k_m.gguf"
 GGUF_URL="https://huggingface.co/${HF_REPO}/resolve/main/hsk5-tutor-q4_k_m.gguf"
+MIN_GGUF_BYTES=8000000000   # a complete 14B Q4 is ~9 GB; anything smaller is a truncated download
 
 # ---- sanity: this app is built for Apple Silicon ---------------------------
 if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
@@ -40,13 +41,13 @@ echo "Installing dependencies…"
 
 # ---- the model (~9 GB, resumable) --------------------------------------------
 mkdir -p outputs
-if [ ! -f "$GGUF" ] || [ "$(stat -f%z "$GGUF" 2>/dev/null || echo 0)" -lt 8000000000 ]; then
+if [ ! -f "$GGUF" ] || [ "$(stat -f%z "$GGUF" 2>/dev/null || stat -c%s "$GGUF" 2>/dev/null || echo 0)" -lt "$MIN_GGUF_BYTES" ]; then
   echo "Downloading the model (~9 GB) — interruptions are fine, re-running resumes…"
   curl -L -C - --fail --progress-bar -o "$GGUF" "$GGUF_URL"
 fi
 # a truncated model file fails confusingly at load time — check the size now
 size=$(stat -f%z "$GGUF" 2>/dev/null || stat -c%s "$GGUF")
-if [ "$size" -lt 8000000000 ]; then
+if [ "$size" -lt "$MIN_GGUF_BYTES" ]; then
   echo "❌ $GGUF is only $((size / 1000000)) MB — the download looks incomplete."
   echo "   Re-run ./setup.sh to resume it."
   exit 1

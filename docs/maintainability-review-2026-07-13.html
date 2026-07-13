@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maintainability review — 2026-07-13</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .verdict { border-left: 4px solid #2f6e5d; background: #eef4f0; padding: .8rem 1.1rem; border-radius: 4px; margin: 1rem 0; }
+  .sev { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; padding: .1rem .45rem; border-radius: 3px; font-weight: 600; white-space: nowrap; }
+  .fix { background: #f6e3e0; color: #8f241f; }
+  .nit { background: #f0ecd9; color: #7a6a1c; }
+  td code { white-space: nowrap; }
+  .ok { color: #2f6e5d; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="crumb"><a href="index.html">← docs</a></p>
+  <p class="eyebrow">Quality · review</p>
+  <h1>Maintainability &amp; readability review</h1>
+  <p class="lead">The whole codebase (~4,150 lines: 8 Python files, the extracted JS/CSS, the flashcards widget, setup.sh) graded against the new CLAUDE.md preference: <em>"clear names, small focused functions, comments only where the code can't speak for itself; simple over clever."</em> Three parallel reviewers; every headline claim spot-verified.</p>
+
+  <div class="verdict">
+    <strong>Verdict: the codebase comfortably meets the standard.</strong> Names are clear, functions are focused, no dead code was found anywhere, and the comment culture is the best kind — recording <em>whys</em> (Gradio quirks, lock discipline, timing races) the code can't say. The real debt is concentrated in one failure mode: <strong>comments that were true when written and became lies during fast iteration</strong> — mostly leftovers of the 7B→14B pivot and this week's refactors. Those are exactly the things that mislead the next reader, and they're all cheap to fix.
+  </div>
+
+  <h2>Worth fixing (13)</h2>
+  <p>Things a maintainer would actually trip over. The first group are comments that state falsehoods; the second are small code cleanups.</p>
+
+  <h3>Comments that lie (truth sweep — zero behavior risk)</h3>
+  <table>
+    <thead><tr><th>Where</th><th>Problem</th></tr></thead>
+    <tbody>
+      <tr><td><code>app.py:3</code></td><td>Module docstring says it serves "the merged+quantized <b>7B</b>" — it's the 14B. First line a reader trusts.</td></tr>
+      <tr><td><code>config.py:~270</code></td><td><code>TrainConfig</code> comments still give <b>7B/T4</b> hardware guidance ("fits a 16GB T4", "152k-vocab 7B") while the file's own BASE_MODEL comment says the 14B needs an A100.</td></tr>
+      <tr><td><code>config.py:~42</code></td><td><code>SYSTEM_PROMPT</code> header claims it's served by app.py "— keep them identical". False since 2026-07-10: app.py serves <code>SYSTEM_PROMPT_APP</code>, a deliberate divergence explained 20 lines later. Contradictory stories in one screen.</td></tr>
+      <tr><td><code>app.py:~1057</code></td><td>Comment says starter chips are sampled "from STARTER_POOL on every page load" — they're the model-written <code>STARTERS</code> injected via <code>HEAD_HTML</code>; the Python <code>STARTER_POOL</code> is only the fallback.</td></tr>
+      <tr><td><code>flashcards.html:218</code></td><td><code>schedule()</code> comment says it "mutates a copy" — it mutates its <em>argument</em> (the copying lives in <code>preview()</code>). A maintainer trusting this corrupts live cards. <b>The single most dangerous comment in the repo.</b></td></tr>
+      <tr><td><code>flashcards.html:11</code></td><td>Stale pointer: palette "matches app.py's PAGE_CSS" — post-refactor it lives in <code>web/app.css</code>.</td></tr>
+      <tr><td><code>get_strokes.py:5</code></td><td>Says "~20MB"; the data is 46 MB (setup.sh has it right).</td></tr>
+      <tr><td><code>train.py:1</code> / <code>eval.py:1</code></td><td>Docstrings hardcode the model name next to a <code>config.BASE_MODEL</code> reference — already updated once, will stale again on the next swap. Drop the literal name.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Small code cleanups</h3>
+  <table>
+    <thead><tr><th>Where</th><th>Problem → fix</th></tr></thead>
+    <tbody>
+      <tr><td><code>web/app.js:408</code></td><td>The injected model-written starters are named <code>STARTER_POOL</code> — colliding with app.py's <em>different</em> fallback list of the same name. Rename (e.g. <code>SERVER_STARTERS</code>).</td></tr>
+      <tr><td><code>setup.sh:43,49</code></td><td>The ~8 GB size threshold <code>8000000000</code> is duplicated; name it once (<code>MIN_GGUF_BYTES</code>). Model size already changed once.</td></tr>
+      <tr><td><code>eval.py:69,76</code></td><td><code>run_pairs</code> collects the <code>gold</code> reference answer; nothing uses it. Either show it in the report (probably the original intent) or delete it.</td></tr>
+      <tr><td><code>app.py:~742</code></td><td><code>_UNLABEL</code> / <code>_TRAILING_EN</code> are defined ~330 lines after first use, and <code>_TRAILING_EN</code>'s comment covers only one of its two uses. Hoist next to the other regex constants; widen comments.</td></tr>
+      <tr><td><code>web/app.js:56</code></td><td>The deck-changed triple (<code>renderWordlist(); syncDeckWords(); pushDeckFile()</code>) is copy-pasted 3× plus two <em>deliberately</em> partial sites that look like mistakes. One <code>afterDeckChange()</code> helper + a one-word comment at the partial sites.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Nits (~17, fix opportunistically)</h2>
+  <ul>
+    <li><code>app.css</code>: <code>.b/.t/.u</code> bubble classes need one decoding comment; bare <code>.spk</code> (reading tab) is unstyled while <code>.spk.line</code> is — looks like an oversight, comment or style the base.</li>
+    <li>Twin TTS implementations (app.js ↔ flashcards.html) share a protocol and duplicated <code>pickVoice</code>/<code>browserSpeak</code> but neither mentions the twin; the 6000&nbsp;ms fallback deadline is an unnamed magic number in both.</li>
+    <li><code>app.py</code>: <code>english_prompt</code>/<code>chinese_prompt</code> read as "a prompt in English" (they mean "message is mostly English"); scattered unnamed truncation caps and two unrelated 0.6 thresholds; <code>respond()</code> at ~125 lines is at the edge (the duplicated 3-line fill-index computation is the one extract that pays).</li>
+    <li><code>gen_data.py</code>: <code>run()</code> does five jobs — extracting the 24-line dry-run printer would let the pipeline read top-to-bottom; <code>generate_batch</code>/<code>generate_conversation</code> share a retry skeleton; the <code>len(msgs) &lt; 6</code> tolerance vs the documented 8–12 deserves a why.</li>
+    <li><code>eval.py</code>: re-implements gen_data's <code>response_text</code>/<code>extract_json_object</code>; judge's <code>temperature=1</code> is load-bearing (thinking requires it) but un-commented at the call site.</li>
+    <li><code>annotate.py</code>: the positional <code>Entry</code> tuple forces index-decoding comments at call sites — a NamedTuple is the boring fix.</li>
+    <li><code>get_cedict.py</code>/<code>get_strokes.py</code>: copy-pasted <code>_ssl_context()</code>; one puzzle-arithmetic length check.</li>
+    <li><code>flashcards.html</code>: card-id scheme differs from app.js's for the same deck (harmless, uncommented); <code>renderWordlist</code> in app.js still builds HTML by string concatenation (f-string-era leftover).</li>
+  </ul>
+
+  <h2>Per-file verdicts</h2>
+  <table>
+    <thead><tr><th>File</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td><code>app.py</code></td><td class="ok">Meets</td></tr>
+      <tr><td><code>annotate.py</code></td><td class="ok">Meets well — small, focused, intent-documented</td></tr>
+      <tr><td><code>config.py</code></td><td>Meets in structure; <b>most hurt by stale comments</b> (config is where comments get read as facts)</td></tr>
+      <tr><td><code>gen_data.py</code></td><td class="ok">Strong — best-documented file; one long function</td></tr>
+      <tr><td><code>train.py</code> / <code>merge.py</code></td><td class="ok">Very clean; model WHY comments</td></tr>
+      <tr><td><code>eval.py</code></td><td>Solid; least tidy of the Python (dead field, re-implemented helpers)</td></tr>
+      <tr><td><code>web/app.js</code></td><td class="ok">Strong — unusually good and <em>accurate</em> why-comments</td></tr>
+      <tr><td><code>web/app.css</code></td><td class="ok">Clean, zero dead rules</td></tr>
+      <tr><td><code>web/flashcards.html</code></td><td class="ok">Meets; one dangerous wrong comment</td></tr>
+      <tr><td><code>setup.sh</code></td><td class="ok">Readable, re-run-safe; one duplicated magic number</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Proposed fix plan</h2>
+  <ol>
+    <li><b>Tier 1 — truth sweep (recommended, ~zero risk):</b> fix all 8 lying/stale comments. Pure comment edits, no behavior change.</li>
+    <li><b>Tier 2 — small cleanups (recommended):</b> the 5 "small code cleanups" above. Each is minutes; only the <code>afterDeckChange()</code> helper and starter rename touch behavior-adjacent code (trivially verifiable).</li>
+    <li><b>Tier 3 — skip for now:</b> the structural nits (function splits, NamedTuple, template-literal conversion, retry-skeleton dedup). Real but disproportionate for a vibe project; revisit if the files grow.</li>
+  </ol>
+
+  <p class="eyebrow" style="margin-top:2rem">Method: 3 parallel reviewers (serve layer / ML pipeline / frontend), findings capped and severity-calibrated; 6 headline claims independently verified before reporting. No dead code found in any file.</p>
+</div>
+</body>
+</html>

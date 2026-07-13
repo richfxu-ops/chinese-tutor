@@ -1,6 +1,7 @@
 """Gradio chat demo for the HSK-5 tutor.
 
-Serves the merged+quantized 7B locally via llama.cpp (Metal on Apple Silicon) and
+Serves the fine-tuned model (merged + quantized to GGUF — config.GGUF_FILE)
+locally via llama.cpp (Metal on Apple Silicon) and
 renders every reply through the reading layer (annotate.py): pinyin over each
 character + hover gloss on each word.
 
@@ -208,6 +209,18 @@ _CJK_CHUNK = re.compile(r"[一-鿿]+[0-9，。！？、；：]*")
 def chinese_only(text: str) -> str:
     lines = (line for line in text.split("\n") if HAS_CJK.search(line))
     return " ".join("".join(_CJK_CHUNK.findall(line)) for line in lines)
+
+
+# List markers / labels the model sometimes prefixes to its lines ("1. ", "例句：").
+# Stripped by the translators (translate_user_to_chinese/_english) and by
+# gen_card_example when parsing the model's line-formatted replies.
+_UNLABEL = re.compile(
+    r"^\s*(?:\d+[.、)]|[-•*]|第[一二三]行[:：]?|例句[:：]?|释义[:：]?|翻译[:：]?|Translation[:：]?)\s*")
+# A trailing run of English glued onto a Chinese line (我很高兴，I am happy).
+# Two users: enforce_chinese_reply strips it as 聊天-mode translation drift, and
+# gen_card_example trims it off example sentences so the zh TTS never voices it
+# (the translation belongs in example_en).
+_TRAILING_EN = re.compile(r"[，,\s]*[A-Za-z][A-Za-z0-9 ,.'’!?;:-]{7,}[.!?]?\s*$")
 
 
 # A tutor correction: 应该说“正确的句子”，因为解释… (the trained shape) or
@@ -738,14 +751,6 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
     yield (render_chat(raw), raw, "", targets, bar())
 
 
-# List markers / labels the model sometimes prefixes to its lines ("1. ", "例句：")
-_UNLABEL = re.compile(
-    r"^\s*(?:\d+[.、)]|[-•*]|第[一二三]行[:：]?|例句[:：]?|释义[:：]?|翻译[:：]?|Translation[:：]?)\s*")
-# A trailing run of English glued onto the example line (我很高兴，I am happy):
-# stripped so the zh TTS never voices it — the translation belongs in example_en.
-_TRAILING_EN = re.compile(r"[，,\s]*[A-Za-z][A-Za-z0-9 ,.'’!?;:-]{7,}[.!?]?\s*$")
-
-
 def gen_card_example(req_json: str) -> str:
     """Write a fresh HSK-5 example sentence for a just-collected flashcard —
     and, when the dictionary had no gloss for the word (CEDICT lacks many
@@ -1054,8 +1059,9 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
                            + html.escape(json.dumps(gen_starters(), ensure_ascii=False))
                            + "</div>",
             starters_req, starters_res)
-        # Starter chips live in plain HTML; APP_JS fills them with a fresh random
-        # sample from STARTER_POOL on every page load and wires the clicks.
+        # Starter chips live in plain HTML; app.js shuffles the model-written
+        # STARTERS injected via HEAD_HTML (SERVER_STARTERS on the JS side) and
+        # wires the clicks. Python's STARTER_POOL is only the generation fallback.
         gr.HTML('<div class="starters-row" id="starters"></div>')
 
         msg.submit(respond, [msg, raw_state, mode, deck_words, targets_state, review_mode],

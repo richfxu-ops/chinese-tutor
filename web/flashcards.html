@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital@0;1&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  /* "teacher's red ink" paper palette — matches app.py's PAGE_CSS. Light-only
+  /* "teacher's red ink" paper palette — matches web/app.css. Light-only
      by design (see planning/DECISIONS.md 2026-07-10); fonts degrade to system
      serifs when offline. */
   :root{
@@ -214,7 +214,8 @@ function toggleAutoplay(){ autoplay = !autoplay; localStorage.setItem("hsk5-auto
 function renderAutoBtn(){ const b = document.getElementById("autobtn"); if(b) b.textContent = "🔊 Auto-play: " + (autoplay ? "on" : "off"); }
 
 // ---- SM-2 scheduling -----------------------------------------------------
-// Returns the updated card (mutates a copy's schedule fields) for a rating.
+// Applies a rating to the card IN PLACE (rate() relies on this;
+// preview() is the one that hands it a copy).
 function schedule(card, rating){
   const q = {again:0, hard:3, good:4, easy:5}[rating];
   if (rating === "again"){

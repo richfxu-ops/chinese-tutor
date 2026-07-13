@@ -2,7 +2,7 @@
 
 The flashcards' 写 practice mode animates and quizzes stroke order via
 hanzi-writer (web/vendor/hanzi-writer.min.js, committed). The per-character
-stroke data (~9k files, ~20MB) is too big for git, so like cedict_ts.u8 it is
+stroke data (~9k files, ~46MB) is too big for git, so like cedict_ts.u8 it is
 fetched once into data/strokes/ and git-ignored.
 
     python get_strokes.py
