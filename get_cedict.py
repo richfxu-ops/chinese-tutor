@@ -20,7 +20,8 @@ OUT = Path(__file__).resolve().parent / "cedict_ts.u8"
 
 
 def _ssl_context() -> ssl.SSLContext:
-    """Prefer certifi's CA bundle — python.org macOS builds often lack system certs."""
+    """Prefer certifi's CA bundle — python.org macOS builds often lack system certs.
+    (Duplicated in get_strokes.py: the fetch scripts stay standalone on purpose.)"""
     try:
         import certifi
         return ssl.create_default_context(cafile=certifi.where())

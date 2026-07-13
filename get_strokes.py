@@ -20,7 +20,7 @@ URL = "https://registry.npmjs.org/hanzi-writer-data/-/hanzi-writer-data-2.0.1.tg
 OUT = Path(__file__).resolve().parent / "data" / "strokes"
 
 
-def _ssl_context() -> ssl.SSLContext:
+def _ssl_context() -> ssl.SSLContext:  # duplicated in get_cedict.py — the fetch scripts stay standalone
     """Prefer certifi's CA bundle — python.org macOS builds often lack system certs."""
     try:
         import certifi
@@ -38,7 +38,7 @@ def main() -> None:
         for m in tf.getmembers():
             name = Path(m.name).name
             # keep only the per-character files (字.json), not package.json/all.json
-            if m.isfile() and name.endswith(".json") and len(name) == len(".json") + 1:
+            if m.isfile() and name.endswith(".json") and len(name.removesuffix(".json")) == 1:
                 (OUT / name).write_bytes(tf.extractfile(m).read())
                 n += 1
     print(f"wrote {n} character files -> {OUT}")

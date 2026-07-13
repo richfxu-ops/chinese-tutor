@@ -38,6 +38,8 @@
     const deck = loadDeck();
     if (deck.some(c => c.front === front)) { toast('“' + front + '” 已在卡片里 · already in your deck'); return; }
     const tip = hz.dataset.tip || '';
+    // tip is annotate.py's title text — "pinyin — gloss"; the " — " separator
+    // is the cross-file contract (see _annotate_word)
     const [pinyin, gloss = ''] = tip.split(/ — (.*)/s, 2);
     // placeholder example: the sentence around the word, from the same bubble —
     // must be mostly Chinese (a quoted word inside an English sentence used to
@@ -163,41 +165,36 @@
         && document.activeElement.closest('.wl-edit')) return;
     const deck = loadDeck();
     if (!deck.length) {
-      el.innerHTML = '<div class="wl-empty">生词表是空的 — 在对话里点一个词就能收藏。<br>' +
-        'Nothing collected yet — click any word in the chat to add it.</div>';
+      el.innerHTML = `<div class="wl-empty">生词表是空的 — 在对话里点一个词就能收藏。<br>`
+        + `Nothing collected yet — click any word in the chat to add it.</div>`;
       return;
     }
     // gloss/example/translation (fix/why on correction cards) are editable in place
     const editable = (c, field, extra) =>
-      ' class="wl-edit' + (extra ? ' ' + extra : '') + '" contenteditable="true" spellcheck="false"'
-      + ' data-fid="' + escHtml(c.id) + '" data-field="' + field + '"'
-      + ' title="点击编辑 · click to edit"';
+      ` class="wl-edit${extra ? ' ' + extra : ''}" contenteditable="true" spellcheck="false"`
+      + ` data-fid="${escHtml(c.id)}" data-field="${field}" title="点击编辑 · click to edit"`;
     const edit = (c, field, cls, val) =>
-      '<td' + editable(c, field, cls) + '>' + escHtml(val || '') + '</td>';
+      `<td${editable(c, field, cls)}>${escHtml(val || '')}</td>`;
     const rows = [...deck].reverse().map(c => {
-      const open = ' class="wl-open" data-fid="' + escHtml(c.id)
-        + '" title="打开卡片 · open this card"';
+      const open = ` class="wl-open" data-fid="${escHtml(c.id)}" title="打开卡片 · open this card"`;
       const cells = c.kind === 'fix'
-        ? '<td class="hanzi sent"><span' + open + '>' + escHtml(c.front) + '</span></td>'
-          + '<td class="py">改错</td>'
+        ? `<td class="hanzi sent"><span${open}>${escHtml(c.front)}</span></td>`
+          + `<td class="py">改错</td>`
           + edit(c, 'fix', 'fixto', c.fix)
           + edit(c, 'why', 'ex', c.why)
-        : '<td class="hanzi"><span' + open + '>' + escHtml(c.front) + '</span></td>'
-          + '<td class="py">' + escHtml(c.pinyin || '') + '</td>'
+        : `<td class="hanzi"><span${open}>${escHtml(c.front)}</span></td>`
+          + `<td class="py">${escHtml(c.pinyin || '')}</td>`
           + edit(c, 'gloss', '', c.gloss)
           // example + its translation as two separately-editable blocks
-          + '<td class="ex"><div' + editable(c, 'example') + '>' + escHtml(c.example || '') + '</div>'
-          + '<div' + editable(c, 'example_en', 'wl-en') + ' data-ph="translation…">'
-          + escHtml(c.example_en || '') + '</div></td>';
-      return '<tr>' + cells
-        + '<td class="st">' + (c.reps > 0 ? c.reps + '×' : 'new') + '</td>'
-        + '<td><button class="wl-remove" title="移除 · remove" data-fid="'
-        + escHtml(c.id) + '">✕</button></td></tr>';
+          + `<td class="ex"><div${editable(c, 'example')}>${escHtml(c.example || '')}</div>`
+          + `<div${editable(c, 'example_en', 'wl-en')} data-ph="translation…">${escHtml(c.example_en || '')}</div></td>`;
+      return `<tr>${cells}<td class="st">${c.reps > 0 ? c.reps + '×' : 'new'}</td>`
+        + `<td><button class="wl-remove" title="移除 · remove" data-fid="${escHtml(c.id)}">✕</button></td></tr>`;
     }).join('');
     el.innerHTML =
-      '<div class="wl-head">生词表 · collected words <b>' + deck.length + '</b></div>'
-      + '<table class="wl-table"><thead><tr><th>词</th><th>拼音</th><th>释义</th>'
-      + '<th>例句</th><th>复习</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+      `<div class="wl-head">生词表 · collected words <b>${deck.length}</b></div>`
+      + `<table class="wl-table"><thead><tr><th>词</th><th>拼音</th><th>释义</th>`
+      + `<th>例句</th><th>复习</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   };
   // in-place edits: save on blur; Enter commits instead of inserting a newline
   document.addEventListener('focusout', (e) => {
@@ -277,11 +274,17 @@
     zhVoice = vs.find(v => /^zh/i.test(v.lang)) || null;
   };
   if (window.speechSynthesis) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
+  // The flashcards iframe has a TWIN of this client (web/flashcards.html:
+  // speak()/stopSpeak() + the tts-request/tts-audio postMessage protocol) —
+  // keep protocol changes in sync there.
   let ttsAudio = null, ttsPending = null, ttsNonce = 0, ttsSpeaking = false;
+  // give the server this long to synthesize before the browser-voice fallback
+  // (same value in the flashcards twin)
+  const TTS_FALLBACK_MS = 6000;
   const ttsRate = () => {
     const s = document.getElementById('tts-speed');
     const v = s ? parseFloat(s.value) : 1;
-    return (v >= 0.5 && v <= 2) ? v : 1;
+    return (v >= 0.5 && v <= 1.5) ? v : 1;   // the #tts-speed slider's own bounds
   };
   document.addEventListener('input', (e) => {
     if (e.target.id !== 'tts-speed') return;
@@ -324,7 +327,7 @@
     setNative(ta, JSON.stringify({ id, text }));
     setTimeout(() => {                                   // server too slow -> browser
       if (ttsPending && ttsPending.id === id) { stopTts(); browserSpeak(text); }
-    }, 6000);
+    }, TTS_FALLBACK_MS);
   });
   let lastTtsRes = '';
   const checkTtsRes = () => {
@@ -407,9 +410,8 @@
   // __STARTERS__) — NOT app.py's STARTER_POOL, which is only its fallback list.
   const SERVER_STARTERS = __STARTERS__;
   const renderStarters = (row, picks) => {
-    const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
     row.innerHTML = '<span class="starters-label">试一试 · try one</span>'
-      + picks.map(p => '<button class="starter-chip">' + esc(p) + '</button>').join('')
+      + picks.map(p => '<button class="starter-chip">' + escHtml(p) + '</button>').join('')
       + '<button class="starter-refresh" title="换一批 · write me a new six">⟲</button>';
   };
   const ensureStarters = () => {

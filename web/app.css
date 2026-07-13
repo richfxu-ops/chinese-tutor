@@ -63,16 +63,21 @@ footer { display:none !important; }
 }
 .chat::-webkit-scrollbar-thumb:hover { background:#c4b391; }
 @keyframes rise { from { opacity:0; transform:translateY(7px); } }
+/* transcript bubbles: .b = bubble, .t = tutor (red-margined), .u = user (wash) —
+   the markup comes from render_chat() in app.py */
 .b { max-width:84%; animation:rise .3s ease both; }
 .b.t { align-self:flex-start; border-left:2px solid var(--cinnabar); padding:.15rem 0 .15rem 1rem; }
 .b.u { align-self:flex-end; background:var(--wash); border:1px solid #e9d3c8;
        border-radius:3px; padding:.5rem .85rem; }
 .b .who { font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.58rem;
           text-transform:uppercase; letter-spacing:.16em; margin-bottom:.4rem; }
-.spk.line { border:none; background:none; cursor:pointer; font-size:.72rem;
-            padding:0 .15rem; margin-left:.35rem; opacity:.3; vertical-align:baseline;
-            transition:opacity .15s; }
-.spk.line:hover { opacity:1; }
+/* read-aloud buttons: .spk is the base (the reading tab uses it bare);
+   .line is the compact inline variant on chat lines */
+.spk { border:none; background:none; cursor:pointer; opacity:.3;
+       transition:opacity .15s; }
+.spk:hover { opacity:1; }
+.spk.line { font-size:.72rem; padding:0 .15rem; margin-left:.35rem;
+            vertical-align:baseline; }
 .b.t .who { color:var(--cinnabar); }
 .b.u .who { color:var(--ink-soft); text-align:right; }
 .b .msg { font-family:"EB Garamond",var(--hanzi-kai); font-size:1.17rem; line-height:2.55; }

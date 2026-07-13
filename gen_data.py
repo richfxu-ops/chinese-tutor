@@ -313,6 +313,12 @@ def extract_json_object(text: str) -> dict:
     return json.loads(match.group(0))
 
 
+# The conversation prompt asks for 8–12 turns; accept down to 6 — the teacher
+# sometimes comes back an exchange short, and a 6-turn conversation still
+# carries the multi-turn signal. Anything shorter raises, so the call retries.
+MIN_CONV_TURNS = 6
+
+
 def to_conversation_record(words: list[str], msgs: list[dict]) -> dict:
     """Validate + wrap one teacher conversation into the chat schema.
     Raises on malformed output so generate_conversation retries."""
@@ -321,7 +327,7 @@ def to_conversation_record(words: list[str], msgs: list[dict]) -> dict:
         for m in msgs
         if m.get("role") in ("user", "assistant") and m.get("content", "").strip()
     ]
-    if len(msgs) < 6:
+    if len(msgs) < MIN_CONV_TURNS:
         raise ValueError(f"conversation too short ({len(msgs)} turns)")
     if msgs[0]["role"] != "user" or msgs[-1]["role"] != "assistant":
         raise ValueError("conversation must start with user and end with assistant")
@@ -337,48 +343,48 @@ def to_conversation_record(words: list[str], msgs: list[dict]) -> dict:
     }
 
 
-def generate_conversation(client, topic: str, words: list[str], has_errors: bool = True,
-                          retries: int = 2) -> list[dict]:
+def _call_teacher(client, prompt: str, parse, describe: str, retries: int = 2) -> list[dict]:
+    """One teacher call with retries: prompt → parse(response text) → records.
+    Any failure — API error, rate limit, odd response shape, validation raise in
+    `parse` — retries; a call that still fails is DROPPED with a note, so one bad
+    batch never kills the whole paid run. The single retry policy for both the
+    single-turn and conversation generators."""
+    last_err = None
+    for _ in range(retries + 1):
+        try:
+            resp = client.messages.create(
+                model=c.TEACHER_MODEL,
+                max_tokens=c.GEN_MAX_TOKENS,
+                temperature=c.GEN_TEMPERATURE,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return parse(response_text(resp))
+        except Exception as e:  # noqa: BLE001 — see docstring
+            last_err = e
+    print(f"  ! dropped {describe} after {retries + 1} tries: {last_err}")
+    return []
+
+
+def generate_conversation(client, topic: str, words: list[str], has_errors: bool = True) -> list[dict]:
     """One API call → one multi-turn record (as a 1-element list, so results
     plug into the same per-task collection as the single-turn batches)."""
     prompt = build_conversation_prompt(topic, words, has_errors)
-    last_err = None
-    for _ in range(retries + 1):
-        try:
-            resp = client.messages.create(
-                model=c.TEACHER_MODEL,
-                max_tokens=c.GEN_MAX_TOKENS,
-                temperature=c.GEN_TEMPERATURE,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            data = extract_json_object(response_text(resp))
-            return [to_conversation_record(words, data["messages"])]
-        except Exception as e:  # noqa: BLE001 — same policy as generate_batch
-            last_err = e
-    print(f"  ! dropped a conversation ({topic}) after {retries + 1} tries: {last_err}")
-    return []
+    return _call_teacher(
+        client, prompt,
+        lambda text: [to_conversation_record(words, extract_json_object(text)["messages"])],
+        f"a conversation ({topic})",
+    )
 
 
-def generate_batch(client, task: c.TaskSpec, items: list[str], mode: str | None = None,
-                   retries: int = 2) -> list[dict]:
-    """One API call → up to len(items) records. Retries on parse failure. `mode`
-    is set only for correct_sentence and selects the response-type prompt."""
+def generate_batch(client, task: c.TaskSpec, items: list[str], mode: str | None = None) -> list[dict]:
+    """One API call → up to len(items) records. `mode` is set only for
+    correct_sentence and selects the response-type prompt."""
     prompt = build_correction_prompt(mode, items) if mode else build_teacher_prompt(task, items)
-    last_err = None
-    for _ in range(retries + 1):
-        try:
-            resp = client.messages.create(
-                model=c.TEACHER_MODEL,
-                max_tokens=c.GEN_MAX_TOKENS,
-                temperature=c.GEN_TEMPERATURE,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            pairs = extract_json_array(response_text(resp))
-            return to_records(task, items, pairs, mode)
-        except Exception as e:  # noqa: BLE001 — never let one bad batch (API error,
-            last_err = e        # rate limit, odd response shape) kill the whole paid run
-    print(f"  ! dropped a {task.name} batch after {retries + 1} tries: {last_err}")
-    return []
+    return _call_teacher(
+        client, prompt,
+        lambda text: to_records(task, items, extract_json_array(text), mode),
+        f"a {task.name} batch",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -395,6 +401,34 @@ def read_jsonl(path: Path) -> list[dict]:
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def print_dry_run(plan: list[tuple[c.TaskSpec, list[str], str | None]],
+                  conv_plan: list[tuple[str, list[str], bool]]) -> None:
+    """--dry-run output: the plan's size plus ONE fully assembled prompt per task
+    (and per correction mode / conversation variant). Free — nothing is called."""
+    n_corr = sum(1 for _, _, m in plan if m)
+    print(f"DRY RUN — {len(plan)} single-turn batches ({n_corr} correction) + "
+          f"{len(conv_plan)} conversations planned. Showing one prompt per task "
+          f"(and per correction mode / conversation variant):\n")
+    seen = set()
+    for task, batch, mode in plan:
+        key = (task.name, mode)
+        if key in seen:
+            continue
+        seen.add(key)
+        label = task.name + (f"  [mode={mode}]" if mode else "")
+        print(f"{'=' * 70}\nTASK: {label}  (targets: {batch})\n{'=' * 70}")
+        print(build_correction_prompt(mode, batch) if mode else build_teacher_prompt(task, batch))
+        print()
+    for has_errors in (True, False):
+        match = next((cp for cp in conv_plan if cp[2] == has_errors), None)
+        if match:
+            topic, words, _ = match
+            print(f"{'=' * 70}\nTASK: conversation  [errors={has_errors}]  "
+                  f"(topic: {topic}, targets: {words})\n{'=' * 70}")
+            print(build_conversation_prompt(topic, words, has_errors))
+            print()
 
 
 def run(limit: int | None, workers: int, dry_run: bool, only: str | None) -> None:
@@ -431,28 +465,7 @@ def run(limit: int | None, workers: int, dry_run: bool, only: str | None) -> Non
             conv_plan.append((rng.choice(c.CONV_TOPICS), words, has_errors))
 
     if dry_run:
-        n_corr = sum(1 for _, _, m in plan if m)
-        print(f"DRY RUN — {len(plan)} single-turn batches ({n_corr} correction) + "
-              f"{len(conv_plan)} conversations planned. Showing one prompt per task "
-              f"(and per correction mode / conversation variant):\n")
-        seen = set()
-        for task, batch, mode in plan:
-            key = (task.name, mode)
-            if key in seen:
-                continue
-            seen.add(key)
-            label = task.name + (f"  [mode={mode}]" if mode else "")
-            print(f"{'=' * 70}\nTASK: {label}  (targets: {batch})\n{'=' * 70}")
-            print(build_correction_prompt(mode, batch) if mode else build_teacher_prompt(task, batch))
-            print()
-        for has_errors in (True, False):
-            match = next((cp for cp in conv_plan if cp[2] == has_errors), None)
-            if match:
-                topic, words, _ = match
-                print(f"{'=' * 70}\nTASK: conversation  [errors={has_errors}]  "
-                      f"(topic: {topic}, targets: {words})\n{'=' * 70}")
-                print(build_conversation_prompt(topic, words, has_errors))
-                print()
+        print_dry_run(plan, conv_plan)
         return
 
     from anthropic import Anthropic

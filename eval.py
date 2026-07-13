@@ -101,7 +101,11 @@ def write_report(results: list[dict]) -> None:
 # Optional Claude-as-judge
 # --------------------------------------------------------------------------- #
 def judge(results: list[dict]) -> None:
+    # lazy imports: only --judge needs these — and on Colab, gen_data.py must be
+    # uploaded alongside eval.py for the shared teacher-response parsing helpers
     from anthropic import Anthropic
+
+    from gen_data import extract_json_object, response_text
 
     client = Anthropic()
     axes = ", ".join(RUBRIC_AXES)
@@ -129,11 +133,12 @@ def judge(results: list[dict]) -> None:
         )
         try:
             resp = client.messages.create(
+                # temperature=1 is REQUIRED when the teacher model thinks (the
+                # same constraint as GEN_TEMPERATURE in config.py) — not a knob
                 model=c.TEACHER_MODEL, max_tokens=1024, temperature=1,
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
-            data = json.loads(text[text.index("{"): text.rindex("}") + 1])
+            data = extract_json_object(response_text(resp))
             a_scores, b_scores = data.get("A", {}), data.get("B", {})
             winner = {"A": "base", "B": "tuned", "tie": "tie"}.get(data.get("winner"), "tie")
         except Exception as e:  # noqa: BLE001 — best-effort judge, skip bad responses

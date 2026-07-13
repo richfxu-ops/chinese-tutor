@@ -20,6 +20,7 @@ import html
 import re
 from functools import lru_cache
 from pathlib import Path
+from typing import NamedTuple
 
 import jieba
 from pypinyin import Style, pinyin
@@ -33,8 +34,12 @@ _CJK_RUN = re.compile(r"[一-鿿]+")
 HAS_CJK = re.compile(r"[一-鿿]")
 
 
-# Entry: (pinyin key, is_proper, [glosses], original spaced reading e.g. "di4 dao5")
-Entry = tuple[str, bool, list[str], str]
+class Entry(NamedTuple):
+    """One CC-CEDICT line for a simplified form."""
+    key: str          # normalized pinyin (lowercase, no spaces, u:→v) — the shape _match_key produces
+    is_proper: bool   # CEDICT reading was capitalized (钱 Qian2 "surname") — loses ties in selection
+    glosses: list[str]
+    reading: str      # original spaced reading, e.g. "di4 dao5"
 
 
 @lru_cache(maxsize=1)
@@ -63,7 +68,7 @@ def load_cedict() -> dict[str, list[Entry]]:
         except (IndexError, ValueError):
             continue
         key = reading.lower().replace(" ", "").replace("u:", "v")
-        out.setdefault(simp, []).append((key, reading != reading.lower(), glosses, reading))
+        out.setdefault(simp, []).append(Entry(key, reading != reading.lower(), glosses, reading))
     return out
 
 
@@ -123,19 +128,19 @@ def _pick_glosses(word: str, cedict: dict[str, list[Entry]]) -> str | None:
     if not entries:
         return None
     key = _match_key(word)
-    pool = [e for e in entries if e[0] == key] or entries
-    pool = [e for e in pool if not e[1]] or pool       # demote proper nouns
+    pool = [e for e in entries if e.key == key] or entries
+    pool = [e for e in pool if not e.is_proper] or pool
     # merge senses across same-reading entries (间 jiān: between AND room),
     # 4 from the primary entry + 2 from each further one, 6 senses max; entries
     # with only metadata senses are skipped, not resurrected
     picked: list[str] = []
-    for i, (_, _, glosses, _) in enumerate(pool):
-        real = _clean_senses(glosses)
+    for i, entry in enumerate(pool):
+        real = _clean_senses(entry.glosses)
         picked += [g for g in real if g not in picked][: 4 if i == 0 else 2]
         if len(picked) >= 6:
             break
     if not picked:                                     # every sense was metadata
-        picked = pool[0][2]
+        picked = pool[0].glosses
     return "; ".join(picked[:6])
 
 
@@ -149,7 +154,7 @@ _SKIP_DISAMBIG = {"的", "了"}
 
 def _meaningful_entries(word: str) -> list[Entry]:
     cedict = load_cedict()
-    return [e for e in cedict.get(word, []) if not e[1] and _clean_senses(e[2])]
+    return [e for e in cedict.get(word, []) if not e.is_proper and _clean_senses(e.glosses)]
 
 
 def ambiguous_words(text: str) -> list[str]:
@@ -185,9 +190,9 @@ def sense_options(word: str) -> list[dict]:
     """One dict per candidate sense of `word`, for the disambiguation prompt and
     for building the override once the model picks: {reading, syllables, brief, gloss}."""
     opts = []
-    for _, _, glosses, reading in _meaningful_entries(word):
-        senses = _clean_senses(glosses)
-        syllables = [_mark_syllable(s) for s in reading.split()]
+    for entry in _meaningful_entries(word):
+        senses = _clean_senses(entry.glosses)
+        syllables = [_mark_syllable(s) for s in entry.reading.split()]
         opts.append({
             "reading": " ".join(syllables),
             "syllables": syllables,

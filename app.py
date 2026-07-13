@@ -203,12 +203,17 @@ THEME = gr.themes.Base(
 # For the per-bubble TTS button: keep only the Chinese of a bilingual reply
 # (per line-with-CJK, drop the Latin words) so the zh voice doesn't wade
 # through the English translations.
+# A run of hanzi plus any digits/CJK punctuation glued to it — punctuation kept
+# so the voice pauses naturally, digits so it reads numbers inside a sentence.
 _CJK_CHUNK = re.compile(r"[一-鿿]+[0-9，。！？、；：]*")
 
 
 def chinese_only(text: str) -> str:
-    lines = (line for line in text.split("\n") if HAS_CJK.search(line))
-    return " ".join("".join(_CJK_CHUNK.findall(line)) for line in lines)
+    kept = []
+    for line in text.split("\n"):
+        if HAS_CJK.search(line):
+            kept.append("".join(_CJK_CHUNK.findall(line)))
+    return " ".join(kept)
 
 
 # List markers / labels the model sometimes prefixes to its lines ("1. ", "例句：").
@@ -234,11 +239,20 @@ _SENT_END = re.compile(r"[。！？!?.]")
 # Praise/agreement in the same sentence means the quote is NOT a correction
 # (你说得对，应该说“…”也可以) — no chip.
 _NOT_A_FIX = re.compile(r"说得对|说得很好|没问题|没有错|是对的|很自然|用得很好")
+# A real correction REVISES the student's sentence, so ≥60% of the fix's unique
+# hanzi must come from it. Validated against the training set (144/150 trained
+# corrections pass — DECISIONS.md 2026-07-11); re-measure before changing.
+_FIX_OVERLAP_MIN = 0.6
+
+
+# ">60% of non-space chars are ASCII" — the working boundary between "an English
+# line" and "a Chinese line that merely contains some English".
+_MOSTLY_ASCII_MIN = 0.6
 
 
 def _mostly_ascii(s: str) -> bool:
     letters = [ch for ch in s if not ch.isspace()]
-    return bool(letters) and sum(ch.isascii() for ch in letters) / len(letters) > 0.6
+    return bool(letters) and sum(ch.isascii() for ch in letters) / len(letters) > _MOSTLY_ASCII_MIN
 
 
 def extract_correction(reply: str, wrong: str) -> tuple[str, str] | None:
@@ -260,7 +274,7 @@ def extract_correction(reply: str, wrong: str) -> tuple[str, str] | None:
     fix_chars = {ch for ch in m.group(1) if HAS_CJK.match(ch)}
     if len(fix_chars) < 2 or not wrong:
         return None
-    if len(fix_chars & set(wrong)) / len(fix_chars) < 0.6:
+    if len(fix_chars & set(wrong)) / len(fix_chars) < _FIX_OVERLAP_MIN:
         return None
     pre = reply[sent_start:m.start()].strip().strip("，、： ")
     if len(pre) <= 3:   # a bare subject ("你"/"这里"), not an explanation
@@ -623,6 +637,14 @@ def enforce_chinese_reply(reply: str) -> str:
     return "\n".join(kept).strip()
 
 
+def _fill_under_last_line(turn: dict, typed: str, translation: str) -> None:
+    """Attach `translation` as a fill under the last NON-EMPTY line of what the
+    bubble displays — a trailing newline must not detach it."""
+    lines = typed.split("\n")
+    idx = max((i for i, l in enumerate(lines) if l.strip()), default=0)
+    turn["fills"] = {idx: translation}
+
+
 def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
             targets: list[str] | None, review_only: bool):
     """user message + raw history → model reply, STREAMED.
@@ -633,7 +655,10 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
     final yield swaps in the fully annotated transcript.
     Yields (chat HTML, raw history, cleared box, targets state, targets bar)."""
     conversational = "聊天" in mode
-    bar = lambda: render_targets(targets if conversational else None)  # noqa: E731
+
+    def bar() -> str:
+        return render_targets(targets if conversational else None)
+
     if not user_msg.strip():
         yield (render_chat(raw), raw, "", targets, bar())
         return
@@ -649,35 +674,31 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
     # and English-dominant input in both modes (the old *mostly-ASCII* gate skipped
     # short/mixed messages), but leaves a predominantly-Chinese message with a stray
     # English word alone — otherwise 聊天 would round-trip the student's own Chinese.
-    _latin = len(re.findall(r"[A-Za-z]", user_msg))
-    english_prompt = _latin >= 4 and _latin >= len(HAS_CJK.findall(user_msg))
-    # the mirror: a Chinese message gets its English beneath. Same ≥4-char bar as
-    # english_prompt; a real sentence, not a 你好.
-    chinese_prompt = not english_prompt and len(HAS_CJK.findall(user_msg)) >= 4
+    latin_count = len(re.findall(r"[A-Za-z]", user_msg))
+    msg_is_english = latin_count >= 4 and latin_count >= len(HAS_CJK.findall(user_msg))
+    # the mirror: a Chinese message gets its English beneath. Same ≥4-char bar;
+    # a real sentence, not a 你好.
+    msg_is_chinese = not msg_is_english and len(HAS_CJK.findall(user_msg)) >= 4
     raw = raw + [user_turn]
     # the message lands in the transcript immediately, and its translation is
     # rendered BEFORE the reply generates (user preference: see the translation
     # first) — at the cost of one translation call (~1–2s) before streaming starts
     yield (render_chat(raw), raw, "", targets, bar())
-    if english_prompt:
+    if msg_is_english:
         # English input → its Chinese beneath. In 聊天 mode the MODEL must also
         # see the Chinese instead of the English — English input makes the tutor
         # drift into translating/evaluating instead of conversing.
         zh = translate_user_to_chinese(user_msg)
         if zh:
-            msg_lines = user_msg.split("\n")
-            idx = max((i for i, l in enumerate(msg_lines) if l.strip()), default=0)
-            user_turn["fills"] = {idx: zh}
+            _fill_under_last_line(user_turn, user_msg, zh)
             if conversational:
                 user_turn["content"] = zh
                 user_turn["display"] = user_msg
-    elif chinese_prompt:
+    elif msg_is_chinese:
         # Chinese input → its English beneath ("did I say what I meant?")
         en = translate_user_to_english(user_msg)
         if en:
-            msg_lines = user_msg.split("\n")
-            idx = max((i for i, l in enumerate(msg_lines) if l.strip()), default=0)
-            user_turn["fills"] = {idx: en}
+            _fill_under_last_line(user_turn, user_msg, en)
     if user_turn.get("fills"):
         yield (render_chat(raw), raw, "", targets, bar())
     messages = [{"role": "system", "content": system}] + strip_for_llm(raw)

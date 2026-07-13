@@ -158,6 +158,8 @@ if (deck.length === 0){
 }
 
 function newCard(front, pinyin, gloss, example, example_en){
+  // sub-ms suffix avoids same-millisecond id collisions; ids are opaque strings,
+  // only uniqueness matters (app.js's collect path uses plain Date.now())
   return { id: front + ":" + (Date.now()+Math.round(performance.now())),
            front, pinyin, gloss, example: example||"", example_en: example_en||"",
            ease:2.5, interval:0, reps:0, lapses:0, due:0 };  // due:0 => new, review now
@@ -172,6 +174,9 @@ if (window.speechSynthesis){ pickVoice(); speechSynthesis.onvoiceschanged = pick
 // from the parent (edge-tts) and fall back to the browser voice; the standalone
 // file just uses the browser voice. The parent posts the audio back below.
 const inIframe = (() => { try { return window.parent && window.parent !== window; } catch(_){ return false; } })();
+// This is the TWIN of web/app.js's TTS client (tts-request/tts-audio protocol) —
+// keep protocol changes in sync there. Same fallback deadline on both sides.
+const TTS_FALLBACK_MS = 6000;
 let fcAudio = null, fcPending = null, fcNonce = 0;
 // neural voice for card audio (own toggle, persisted; only meaningful when
 // embedded — standalone uses the browser voice, so the button hides)
@@ -207,7 +212,7 @@ function speak(text){
   fcPending = { id, text };
   try { parent.postMessage({ type:"tts-request", id, text, voice: fcVoice }, "*"); }
   catch(_){ fcPending = null; browserSpeak(text); return; }
-  setTimeout(() => { if(fcPending && fcPending.id === id){ fcPending = null; browserSpeak(text); } }, 6000);
+  setTimeout(() => { if(fcPending && fcPending.id === id){ fcPending = null; browserSpeak(text); } }, TTS_FALLBACK_MS);
 }
 function maybeAutoSpeak(c){ if(autoplay && c && c.kind !== "fix" && c.id !== lastSpokenId){ lastSpokenId = c.id; speak(c.front); } }  // don't voice a wrong sentence
 function toggleAutoplay(){ autoplay = !autoplay; localStorage.setItem("hsk5-autoplay", autoplay?"1":"0"); renderAutoBtn(); if(autoplay && current) speak(current.front); }
