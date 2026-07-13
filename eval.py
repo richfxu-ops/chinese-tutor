@@ -1,4 +1,4 @@
-"""Before/after eval: base Qwen2.5-7B vs. the QLoRA-tuned tutor.
+"""Before/after eval: the base model (config.BASE_MODEL, Qwen2.5-14B) vs. the QLoRA-tuned tutor.
 
 Runs on the same CUDA GPU you trained on (Colab). It loads the base once, attaches
 the trained adapter, and generates on the held-out eval prompts with the adapter
@@ -40,7 +40,7 @@ def load_eval(n: int | None) -> list[dict]:
 
 
 def build_model():
-    """Base 7B in 4-bit with the adapter attached (toggled on/off per generation)."""
+    """Base model in 4-bit with the adapter attached (toggled on/off per generation)."""
     tok = AutoTokenizer.from_pretrained(c.BASE_MODEL)
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token

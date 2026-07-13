@@ -1,4 +1,4 @@
-"""QLoRA supervised fine-tune of Qwen2.5-7B-Instruct into the HSK-5 tutor.
+"""QLoRA supervised fine-tune of the base model (config.BASE_MODEL, Qwen2.5-14B-Instruct) into the HSK-5 tutor.
 
 Runs on a CUDA GPU (Colab) — bitsandbytes 4-bit is CUDA-only. It loads the
 chat-format data from data/*.jsonl, attaches a LoRA adapter to the 4-bit base,

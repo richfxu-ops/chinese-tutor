@@ -4,8 +4,8 @@ QLoRA trains a small adapter on top of a frozen 4-bit base. To serve it we fold
 those weights back into a full-precision copy of the base, giving a normal
 Transformers model we can then quantize to GGUF for the Mac demo.
 
-Runs wherever there's enough RAM/VRAM to hold the 7B in fp16 (~15GB) — do it on
-Colab right after train.py, before the GGUF step.
+Runs wherever there's enough RAM/VRAM to hold the base in fp16 (14B ≈ 28GB; a 7B
+was ~15GB) — do it on Colab right after train.py, before the GGUF step.
 
     python merge.py            # outputs/  ->  outputs/merged/
 """
