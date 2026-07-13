@@ -218,19 +218,20 @@ button[role="tab"][aria-selected="true"] {
   content:""; position:absolute; left:4px; top:1px; width:3px; height:7px;
   border:solid var(--sheet); border-width:0 2px 2px 0; transform:rotate(45deg);
 }
-#mode { margin:.15rem 0 .1rem; }
-#mode label {
+/* #level (the HSK selector) shares the mode toggle's pill look */
+#mode, #level { margin:.15rem 0 .1rem; }
+#mode label, #level label {
   background:transparent !important; border:1px solid var(--hairline) !important;
   border-radius:2px !important; color:var(--ink-soft) !important;
   font-family:"IBM Plex Mono",ui-monospace,monospace !important; font-size:.68rem !important;
   letter-spacing:.1em; text-transform:uppercase; padding:.3rem .65rem !important;
   box-shadow:none !important; cursor:pointer;
 }
-#mode label.selected {
+#mode label.selected, #level label.selected {
   color:var(--cinnabar) !important; border-color:var(--cinnabar) !important;
   background:var(--sheet) !important;
 }
-#mode input { display:none; }
+#mode input, #level input { display:none; }
 
 /* 🔊 voice picker + speed slider — its own row; cluster everything inline on the
    left. Gradio row children default to flex-grow, which spread them apart (the

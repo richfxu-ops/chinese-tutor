@@ -19,6 +19,13 @@ OUTPUT_DIR = ROOT / "outputs"          # adapter + merged model land here
 VOCAB_FILE = ROOT / "hsk5_vocab.txt"
 GRAMMAR_FILE = ROOT / "hsk5_grammar.txt"
 
+# Serve-time level options. HSK 5 is what the model was fine-tuned on; 4 and 6
+# are prompt-steered variants (see system_prompt_app / conversation_system) with
+# their own seed lists for starters, targets and reading passages.
+HSK_LEVELS = (4, 5, 6)
+LEVEL_VOCAB_FILES = {4: ROOT / "hsk4_vocab.txt", 5: VOCAB_FILE, 6: ROOT / "hsk6_vocab.txt"}
+LEVEL_GRAMMAR_FILES = {4: ROOT / "hsk4_grammar.txt", 5: GRAMMAR_FILE, 6: ROOT / "hsk6_grammar.txt"}
+
 TRAIN_FILE = DATA_DIR / "train.jsonl"
 EVAL_FILE = DATA_DIR / "eval.jsonl"
 
@@ -71,6 +78,22 @@ SYSTEM_PROMPT_APP = SYSTEM_PROMPT + (
     "\n- 每次回答的最后，用一个简短的双语问题结束，鼓励学生继续对话或练习。"
 )
 
+# HSK level → the parenthetical register label the prompts use.
+_LEVEL_LABELS = {4: "中级", 5: "中高级", 6: "高级"}
+
+
+def _leveled(text: str, level: int) -> str:
+    """Swap a prompt's HSK-5 wording for another level. At level 5 both replaces
+    are no-ops, so the trained/served level-5 prompts stay byte-identical — the
+    default level cannot regress."""
+    return (text.replace("HSK 5（中高级）", f"HSK {level}（{_LEVEL_LABELS[level]}）")
+                .replace("HSK 5", f"HSK {level}"))
+
+
+def system_prompt_app(level: int = 5) -> str:
+    """The served Q&A prompt at the chosen HSK level (5 = the trained level)."""
+    return _leveled(SYSTEM_PROMPT_APP, level)
+
 # Conversation mode (app-only, never used in training). A different framing, not
 # a bolted-on rule: the tutor LEADS a chat and corrects the student in passing.
 # English translations are deliberately dropped — the app's reading layer
@@ -95,11 +118,12 @@ CONVERSATION_PROMPT = (
 )
 
 
-def conversation_system(targets: list[str]) -> str:
-    """The exact conversation-mode system prompt served by app.py — and used
-    verbatim as the system turn of generated conversation training data, so
-    train and serve see the same prompt."""
-    return CONVERSATION_PROMPT + (
+def conversation_system(targets: list[str], level: int = 5) -> str:
+    """The exact conversation-mode system prompt served by app.py — and, at
+    level 5, used verbatim as the system turn of generated conversation training
+    data, so train and serve see the same prompt. Other levels are prompt-steered
+    variants of the same text."""
+    return _leveled(CONVERSATION_PROMPT, level) + (
         f"\n- 本次对话的目标生词：{'、'.join(targets)}。"
         "每次回复都要做到这两点之一：要么自然地用上一个目标生词，"
         "要么直接请学生用其中一个词回答你的问题（比如“用‘承受’说说你的感受”）。"

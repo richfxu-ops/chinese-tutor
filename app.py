@@ -96,20 +96,28 @@ def _load_seed(path) -> list[str]:
     return load_seed(path) if path.exists() else []
 
 
-HSK_VOCAB = _load_seed(c.VOCAB_FILE)
-HSK_GRAMMAR = _load_seed(c.GRAMMAR_FILE)
+# Per-level seed lists (starters, conversation targets, reading passages).
+# A missing file just means an empty pool — every consumer degrades gracefully.
+LEVEL_VOCAB = {lvl: _load_seed(p) for lvl, p in c.LEVEL_VOCAB_FILES.items()}
+LEVEL_GRAMMAR = {lvl: _load_seed(p) for lvl, p in c.LEVEL_GRAMMAR_FILES.items()}
 
 
-def gen_starters() -> list[str]:
+def _level_num(label: str | int) -> int:
+    """The HSK level from the UI radio's label ('HSK 4' → 4); anything odd → 5."""
+    m = re.search(r"[456]", str(label or ""))
+    return int(m.group()) if m else 5
+
+
+def gen_starters(level: int = 5) -> list[str]:
     """Model-written starter chips, one per task type, seeded with random vocab
     and grammar so every launch is a new set. Falls back to STARTER_POOL —
     for ANY failure, including missing/short seed files, so this can never
     block launch (everything lives inside the try)."""
     try:
-        words = random.sample(HSK_VOCAB, 4)
-        grammar = random.choice(HSK_GRAMMAR)
+        words = random.sample(LEVEL_VOCAB[level], 4)
+        grammar = random.choice(LEVEL_GRAMMAR[level])
         prompt = (
-            "为一个HSK5水平的学生写6个开场问题，模拟学生问中文老师时会说的话，每种一个。"
+            f"为一个HSK{level}水平的学生写6个开场问题，模拟学生问中文老师时会说的话，每种一个。"
             "每一条都必须是学生对老师的【请求或提问】，不能是回答或对话本身：\n"
             f"1. 问“{words[0]}”是什么意思\n"
             f"2. 请老师用“{words[1]}”造句\n"
@@ -575,14 +583,14 @@ def render_chat(raw: list[dict], unclosed: bool = False) -> str:
 
 # Target words for conversation mode: the student's own collected flashcard
 # words first (the deck lives client-side, so APP_JS mirrors the word list into
-# a hidden textbox), padded to 5 with random HSK-5 seeds (HSK_VOCAB, loaded at
-# the top). Picked once per conversation and kept until 清空 so the tutor can
+# a hidden textbox), padded to 5 with random seeds from the selected level's
+# vocab list. Picked once per conversation and kept until 清空 so the tutor can
 # keep circling back to them.
-def pick_targets(deck_json: str, review_only: bool = False) -> list[str]:
+def pick_targets(deck_json: str, review_only: bool = False, level: int = 5) -> list[str]:
     """Conversation target words. Normal mode: up to 3 deck words (due first)
-    padded to 5 with random HSK-5 seeds. Review mode: ONLY due cards — the
-    conversation becomes the SRS review session (falls back to normal when
-    nothing is due)."""
+    padded to 5 with random seeds at the selected HSK level. Review mode: ONLY
+    due cards — the conversation becomes the SRS review session (falls back to
+    normal when nothing is due)."""
     def clean(ws):
         return [w for w in ws if isinstance(w, str) and w.strip()]
     try:
@@ -596,7 +604,7 @@ def pick_targets(deck_json: str, review_only: bool = False) -> list[str]:
     if review_only and due:
         return due[:5]
     targets = (due + other)[:3]
-    pool = [w for w in HSK_VOCAB if w not in targets]
+    pool = [w for w in LEVEL_VOCAB.get(level, LEVEL_VOCAB[5]) if w not in targets]
     targets += random.sample(pool, k=min(5 - len(targets), len(pool)))
     return targets
 
@@ -646,7 +654,7 @@ def _fill_under_last_line(turn: dict, typed: str, translation: str) -> None:
 
 
 def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
-            targets: list[str] | None, review_only: bool):
+            targets: list[str] | None, review_only: bool, level_label: str = "HSK 5"):
     """user message + raw history → model reply, STREAMED.
 
     A generator: tokens render live in a plain bubble (the reading layer needs
@@ -662,13 +670,15 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
     if not user_msg.strip():
         yield (render_chat(raw), raw, "", targets, bar())
         return
+    level = _level_num(level_label)
     if conversational:
         if not targets:
-            targets = pick_targets(deck_json, review_only)
-        # shared with gen_data.py so training data and serving use the same prompt
-        system = c.conversation_system(targets)
+            targets = pick_targets(deck_json, review_only, level)
+        # at level 5 this is the exact prompt the conversation data was trained
+        # on (shared with gen_data.py); 4/6 are prompt-steered variants
+        system = c.conversation_system(targets, level)
     else:
-        system = c.SYSTEM_PROMPT_APP
+        system = c.system_prompt_app(level)
     user_turn = {"role": "user", "content": user_msg}
     # Translate when the message is at least half English by content: catches pure
     # and English-dominant input in both modes (the old *mostly-ASCII* gate skipped
@@ -907,29 +917,54 @@ def _render_passage(title: str, passage: str, translation: str, questions: list)
             f'<div class="rd-passage">{_tipped(passage)}</div>{trans}{qblock}')
 
 
-def gen_passage(topic: str):
-    """Yield a placeholder, then an HSK-5 reading passage + comprehension
-    questions on `topic` (random CONV_TOPIC when blank), rendered annotated."""
+def gen_passage(topic: str, level_label: str = "HSK 5"):
+    """Yield a placeholder, then a reading passage + comprehension questions at
+    the selected HSK level on `topic` (random CONV_TOPIC when blank), rendered
+    annotated."""
+    level = _level_num(level_label)
     topic = (topic or "").strip() or random.choice(c.CONV_TOPICS)
     yield _reading_shell(
-        f'<div class="rd-loading">正在写一篇关于“{html.escape(topic)}”的短文…<br>'
+        f'<div class="rd-loading">正在写一篇关于“{html.escape(topic)}”的文章…<br>'
         f'writing a passage about “{html.escape(topic)}”…</div>')
-    prompt = (
-        f"为一个HSK5水平的学生写一篇简短的中文阅读短文，主题是“{topic}”。\n"
-        "要求：\n"
-        "- 大约120字，写成连贯的一段（不要分行），用HSK5或以下的词汇和语法，自然、有意思。\n"
-        "- 不要拼音。\n"
-        "- 出3个中文理解问题，每个配一个简短的中文参考答案。\n"
-        "- 给出整篇短文的英文翻译。\n"
-        "只返回一个JSON对象，所有字符串写在一行内（不要换行）：\n"
-        '{"title":"标题","passage":"短文","translation":"English translation",'
-        '"questions":[{"q":"问题","a":"答案"},{"q":"…","a":"…"},{"q":"…","a":"…"}]}\n'
-        "不要解释，不要用markdown。"
+    # The passage is built from TWO generations and joined. Asked for one
+    # ~240-char passage in one call, the fine-tuned model snaps back to its
+    # trained reply length no matter how the length is phrased (87–153 chars
+    # across four prompt variants, measured) — so each half gets its own
+    # reply-sized call instead, the same fight-the-prior-with-another-call
+    # pattern as fill_translations.
+    half_prompt = (
+        f"为一个HSK{level}水平的学生写一篇约240字的中文阅读文章的【前半部分】，"
+        f"主题是“{topic}”。\n"
+        "- 前半大约120字：先引入话题，再开始讲一个具体的经历或例子，"
+        "讲到一半停下（后半部分会接着写）。\n"
+        f"- 用HSK{level}或以下的词汇和语法，并尽量用上一些HSK{level}水平的词语"
+        "（不要全是简单词）。不要拼音，不要换行。\n"
+        "只返回前半部分的正文，不要标题，不要解释。"
     )
     try:
-        out = generate([{"role": "user", "content": prompt}], temperature=0.8, max_tokens=1024)
+        part1 = generate([{"role": "user", "content": half_prompt}],
+                         temperature=0.8, max_tokens=400).strip().strip('"“”')
+        if not HAS_CJK.search(part1):
+            raise ValueError("empty first half")
+        finish_prompt = (
+            f"下面是一篇给HSK{level}水平学生的中文阅读文章的前半部分（主题：{topic}）：\n"
+            f"{part1}\n\n"
+            "请完成三件事：\n"
+            "1. 写出文章的【后半部分】，大约120字：接着前半继续讲（不要重新开头），"
+            f"补充细节，最后总结或给出看法。用HSK{level}或以下的词汇和语法，"
+            "不要拼音，不要换行。\n"
+            "2. 给整篇文章（前半+后半）写英文翻译。\n"
+            "3. 出3个中文理解问题，每个配一个简短的中文参考答案。\n"
+            "只返回一个JSON对象，所有字符串写在一行内（不要换行）：\n"
+            '{"title":"标题","part2":"文章后半","translation":"English translation",'
+            '"questions":[{"q":"问题","a":"答案"},{"q":"…","a":"…"},{"q":"…","a":"…"}]}\n'
+            "不要解释，不要用markdown。"
+        )
+        # 1536: part2 + the full English translation + 3 Q&A in one JSON object
+        out = generate([{"role": "user", "content": finish_prompt}],
+                       temperature=0.8, max_tokens=1536)
         data = extract_json_object(out)
-        passage = str(data.get("passage", "")).strip()
+        passage = part1 + str(data.get("part2", "")).strip().strip('"“”')
         if not passage:
             raise ValueError("empty passage")
         questions = [q for q in data.get("questions", []) if isinstance(q, dict) and q.get("q")]
@@ -1024,6 +1059,13 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
                 False, label="复习模式 · target only due cards", elem_id="review-mode",
                 container=False,
             )
+            # HSK level: 5 is the trained level; 4/6 steer the prompts (and pick
+            # their own seed lists). An event input to respond/gen_passage/the
+            # starters refresh — which is also what makes the radio clickable.
+            level_pick = gr.Radio(
+                ["HSK 4", "HSK 5", "HSK 6"], value="HSK 5",
+                show_label=False, elem_id="level", container=False, interactive=True,
+            )
         # 🔊 neural-voice pick on its OWN row — kept out of the crowded mode-row so
         # both pills stay clickable. synth_tts reads the selection (wired below);
         # applies to chat + reading (the flashcards iframe has its own TTS).
@@ -1076,16 +1118,17 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
                                   show_label=False, container=False)
         starters_res = gr.HTML("", elem_classes=["hidden-input"])
         starters_req.change(
-            lambda _nonce: '<div id="starters-data">'
-                           + html.escape(json.dumps(gen_starters(), ensure_ascii=False))
-                           + "</div>",
-            starters_req, starters_res)
+            lambda _nonce, lvl: '<div id="starters-data">'
+                                + html.escape(json.dumps(gen_starters(_level_num(lvl)),
+                                                         ensure_ascii=False))
+                                + "</div>",
+            [starters_req, level_pick], starters_res)
         # Starter chips live in plain HTML; app.js shuffles the model-written
         # STARTERS injected via HEAD_HTML (SERVER_STARTERS on the JS side) and
         # wires the clicks. Python's STARTER_POOL is only the generation fallback.
         gr.HTML('<div class="starters-row" id="starters"></div>')
 
-        msg.submit(respond, [msg, raw_state, mode, deck_words, targets_state, review_mode],
+        msg.submit(respond, [msg, raw_state, mode, deck_words, targets_state, review_mode, level_pick],
                    [chat_html, raw_state, msg, targets_state, targets_bar])
         clear = gr.Button("清空 · clear", elem_id="clear-btn")
         clear.click(lambda: (render_chat([]), [], "", None, ""), None,
@@ -1094,6 +1137,9 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
         # resets them — the next message re-picks under the new mode instead
         # of the checkbox being a silent no-op mid-conversation
         review_mode.change(lambda: (None, ""), None, [targets_state, targets_bar])
+        # same deal for the level: targets are per-conversation, so switching
+        # level re-picks them from the new level's pool on the next message
+        level_pick.change(lambda: (None, ""), None, [targets_state, targets_bar])
     with gr.Tab("阅读 · reading"):
         with gr.Row(elem_id="rd-controls"):
             rd_topic = gr.Textbox(
@@ -1101,11 +1147,11 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
                 show_label=False, container=False, elem_id="rd-topic", scale=5)
             rd_btn = gr.Button("生成短文 · new passage", elem_id="rd-btn", scale=1)
         rd_out = gr.HTML(_reading_shell(
-            '<div class="rd-loading">点“生成短文”，我会写一篇HSK5短文和几个理解问题。<br>'
+            '<div class="rd-loading">点“生成短文”，我会按你选的HSK水平写一篇文章和几个理解问题。<br>'
             'Click “new passage” for an HSK-5 reading with comprehension questions.<br>'
             '每个词都能悬停看释义、点一下收藏 · hover any word for its meaning, click to save it.</div>'))
-        rd_btn.click(gen_passage, rd_topic, rd_out)
-        rd_topic.submit(gen_passage, rd_topic, rd_out)
+        rd_btn.click(gen_passage, [rd_topic, level_pick], rd_out)
+        rd_topic.submit(gen_passage, [rd_topic, level_pick], rd_out)
     with gr.Tab("卡片 · flashcards"):
         gr.HTML(flashcards_srcdoc())
     with gr.Tab("词表 · word list"):
