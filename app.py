@@ -464,10 +464,12 @@ _EN_PREAMBLE = re.compile(
     re.IGNORECASE)
 
 
-def translate_user_to_english(text: str) -> str:
-    """English translation of the student's Chinese message — shown as a fill
-    under their bubble (the mirror of translate_user_to_chinese) so they can
-    check they said what they meant."""
+def translate_user_to_english(text: str, max_tokens: int = 160, max_chars: int = 400) -> str:
+    """Faithful English translation of Chinese `text`, at temperature 0.
+    Two users: the fill under the student's bubble (defaults sized for a chat
+    message) and the reading passage's translation (larger budgets, passed in) —
+    translating the FINAL text in its own call is what keeps the translation
+    matching the text."""
     prompt = (
         "把下面这段中文翻译成自然的英文，忠实传达原意。"
         "这是翻译任务，不是问答——如果原文是一个问题，就翻译这个问题本身，"
@@ -476,7 +478,7 @@ def translate_user_to_english(text: str) -> str:
     )
     try:
         out = generate([{"role": "user", "content": prompt}],
-                       temperature=0, max_tokens=160)
+                       temperature=0, max_tokens=max_tokens)
         lines = [_UNLABEL.sub("", l).strip().strip('"“”')
                  for l in out.splitlines() if l.strip()]
         en = " ".join(l for l in lines if _mostly_ascii(l))
@@ -484,7 +486,7 @@ def translate_user_to_english(text: str) -> str:
         # preamble the model sometimes adds despite the prompt (anything short
         # ending in translation/translates-to + colon)
         stripped = _EN_PREAMBLE.sub("", en).strip()
-        return (stripped or en)[:400]
+        return (stripped or en)[:max_chars]
     except Exception:  # noqa: BLE001 — no translation is just the old behavior
         return ""
 
@@ -953,24 +955,25 @@ def gen_passage(topic: str, level_label: str = "HSK 5"):
             "1. 写出文章的【后半部分】，大约120字：接着前半继续讲（不要重新开头），"
             f"补充细节，最后总结或给出看法。用HSK{level}或以下的词汇和语法，"
             "不要拼音，不要换行。\n"
-            "2. 给整篇文章（前半+后半）写英文翻译。\n"
-            "3. 出3个中文理解问题，每个配一个简短的中文参考答案。\n"
+            "2. 出3个中文理解问题，每个配一个简短的中文参考答案。\n"
             "只返回一个JSON对象，所有字符串写在一行内（不要换行）：\n"
-            '{"title":"标题","part2":"文章后半","translation":"English translation",'
+            '{"title":"标题","part2":"文章后半",'
             '"questions":[{"q":"问题","a":"答案"},{"q":"…","a":"…"},{"q":"…","a":"…"}]}\n'
             "不要解释，不要用markdown。"
         )
-        # 1536: part2 + the full English translation + 3 Q&A in one JSON object
         out = generate([{"role": "user", "content": finish_prompt}],
-                       temperature=0.8, max_tokens=1536)
+                       temperature=0.8, max_tokens=1024)
         data = extract_json_object(out)
         passage = part1 + str(data.get("part2", "")).strip().strip('"“”')
         if not passage:
             raise ValueError("empty passage")
         questions = [q for q in data.get("questions", []) if isinstance(q, dict) and q.get("q")]
+        # the translation gets its OWN temperature-0 call from the FINAL joined
+        # text — written alongside part2 in the same generation, it drifted from
+        # what the passage actually says (user-reported)
+        translation = translate_user_to_english(passage, max_tokens=500, max_chars=1200)
         yield _reading_shell(_render_passage(
-            str(data.get("title", topic)).strip(), passage,
-            str(data.get("translation", "")).strip(), questions))
+            str(data.get("title", topic)).strip(), passage, translation, questions))
     except Exception as e:  # noqa: BLE001 — a failed passage is retryable via the button
         yield _reading_shell(
             '<div class="rd-loading">这篇没写成，请再点一次“生成短文”。<br>'
