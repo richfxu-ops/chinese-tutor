@@ -30,6 +30,22 @@
     return c.textContent;
   };
 
+  // Hover tooltips are left-anchored to the word; near the right edge that
+  // overflows the chat box (overflow-y:auto clips x as well) or the viewport,
+  // so flip to right-anchored when the left-anchored width doesn't fit.
+  document.addEventListener('mouseover', (e) => {
+    const hz = e.target.closest('.hz');
+    if (!hz) return;
+    const box = hz.closest('.chat, .reading');
+    // clientWidth over innerWidth (excludes the scrollbar), and fall back to the
+    // container's own edge when the viewport reads 0 (embedded webviews do this)
+    const vw = document.documentElement.clientWidth || window.innerWidth;
+    const boxRight = box ? box.getBoundingClientRect().right : (vw || 1e9);
+    const rightEdge = vw ? Math.min(boxRight, vw) : boxRight;
+    const tipWidth = Math.min(330, (vw || boxRight) * 0.6);   // mirrors the CSS max-width
+    hz.classList.toggle('tip-flip', hz.getBoundingClientRect().left + tipWidth > rightEdge - 8);
+  });
+
   document.addEventListener('click', (e) => {
     const hz = e.target.closest('.hz');
     if (!hz) return;

@@ -105,6 +105,9 @@ rt { font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.42em; font-w
   font-size:.85rem; line-height:1.5; padding:.4rem .65rem; border-radius:3px;
   box-shadow:0 3px 12px rgba(38,32,26,.3); pointer-events:none; z-index:20;
 }
+/* …and right-aligned when a left-anchored tooltip would clip at the right edge
+   (the chat box's overflow-y:auto clips x too) — app.js measures on hover */
+.hz.tip-flip:hover::after { left:auto; right:-.25rem; }
 .fix-collect {
   margin-top:.45rem; background:transparent; border:1px dotted var(--cinnabar);
   border-radius:2px; color:var(--cinnabar); cursor:pointer;
