@@ -1334,6 +1334,42 @@ def translate_user_to_chinese(text: str, max_tokens: int = 120) -> str:
         return ""
 
 
+# "Sure, here's the translation:" / "In English this translates to:" — a short
+# lead-in ending in translat* (+ optional is/to/as/would/be) and a colon. Needs
+# the word itself, so a translation merely starting with "Sure" is never eaten;
+# only linking words may sit between it and the colon, so a REAL translation
+# like "Translate this document: ..." survives. No .!?/quotes in the lead-in —
+# a preamble is one short clause, not a finished sentence.
+_EN_PREAMBLE = re.compile(
+    r"^[^\"“”.!?]{0,40}?translat\w*(?:\s+(?:is|to|as|would|be)){0,2}\s*[:：]\s*",
+    re.IGNORECASE)
+
+
+def translate_user_to_english(text: str) -> str:
+    """English translation of the student's Chinese message — shown as a fill
+    under their bubble (the mirror of translate_user_to_chinese) so they can
+    check they said what they meant."""
+    prompt = (
+        "把下面这段中文翻译成自然的英文，忠实传达原意。"
+        "这是翻译任务，不是问答——如果原文是一个问题，就翻译这个问题本身，"
+        "绝对不要回答它。直接输出译文本身：不要任何开场白、说明或引号"
+        "（不要写 Sure、Here's the translation 之类）。\n\n原文：" + text.strip()
+    )
+    try:
+        out = generate([{"role": "user", "content": prompt}],
+                       temperature=0, max_tokens=160)
+        lines = [_UNLABEL.sub("", l).strip().strip('"“”')
+                 for l in out.splitlines() if l.strip()]
+        en = " ".join(l for l in lines if _mostly_ascii(l))
+        # belt-and-braces: drop a leading "Sure, here's the translation:"-style
+        # preamble the model sometimes adds despite the prompt (anything short
+        # ending in translation/translates-to + colon)
+        stripped = _EN_PREAMBLE.sub("", en).strip()
+        return (stripped or en)[:400]
+    except Exception:  # noqa: BLE001 — no translation is just the old behavior
+        return ""
+
+
 def _spk(line: str) -> str:
     """A small per-line TTS button voicing just that line's Chinese."""
     return (f'<button class="spk line" title="朗读这一行 · read this line aloud"'
@@ -1518,6 +1554,10 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
     # English word alone — otherwise 聊天 would round-trip the student's own Chinese.
     _latin = len(re.findall(r"[A-Za-z]", user_msg))
     english_prompt = _latin >= 4 and _latin >= len(HAS_CJK.findall(user_msg))
+    # the mirror: a Chinese message gets its English beneath (translated in the
+    # annotation pass — see below), so the student can check they said what they
+    # meant. Same ≥4-char bar as english_prompt; a real sentence, not a 你好.
+    chinese_prompt = not english_prompt and len(HAS_CJK.findall(user_msg)) >= 4
     if conversational and english_prompt:
         # the conversation must stay Chinese for the MODEL — English input makes
         # the tutor drift into translating/evaluating instead of conversing. The
@@ -1604,6 +1644,15 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
             msg_lines = user_msg.split("\n")
             idx = max((i for i, l in enumerate(msg_lines) if l.strip()), default=0)
             raw[-2]["fills"] = {idx: zh}
+    # a Chinese prompt gets its English beneath, in BOTH modes — the mirror of
+    # the English→Chinese fill above (chinese_prompt excludes english_prompt,
+    # so this never clashes with the 聊天 pre-translation fills)
+    if chinese_prompt:
+        en = translate_user_to_english(user_msg)
+        if en:
+            msg_lines = user_msg.split("\n")
+            idx = max((i for i, l in enumerate(msg_lines) if l.strip()), default=0)
+            raw[-2]["fills"] = {idx: en}
     yield (render_chat(raw), raw, "", targets, bar())
 
 
