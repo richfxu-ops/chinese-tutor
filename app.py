@@ -818,17 +818,38 @@ def gen_card_example(req_json: str) -> str:
     # definition line echoing the headword, '很累 — to be very tired', is
     # mostly ASCII and must not qualify); the definition is an English line
     # BEFORE it, the translation an English line AFTER it
-    ex_idx = next((i for i, l in enumerate(lines)
-                   if word in l and HAS_CJK.search(l) and not _mostly_ascii(l)), None)
+    def has_word(line: str) -> bool:
+        """Verbatim, or split: 离合词 get used correctly SPLIT (打交道 →
+        打了三年的交道), which a plain `word in line` rejects — that threw away
+        perfect examples. Characters-in-order is the fallback test; loose in
+        general, but these lines were just generated FOR this word."""
+        if word in line:
+            return True
+        it = iter(line)
+        return all(ch in it for ch in word)
+
+    def is_example(line: str) -> bool:
+        return bool(HAS_CJK.search(line)) and not _mostly_ascii(line)
+
+    # prefer a line containing the word verbatim; fall back to a split match
+    ex_idx = next((i for i, l in enumerate(lines) if word in l and is_example(l)),
+                  None)
+    if ex_idx is None:
+        ex_idx = next((i for i, l in enumerate(lines)
+                       if has_word(l) and is_example(l)), None)
     resp: dict[str, str] = {"id": card_id}
     if ex_idx is not None:
         example = lines[ex_idx][:120]
         trimmed = _TRAILING_EN.sub("", example).strip()
-        if trimmed and word in trimmed:      # keep the trim only if it leaves a valid example
+        if trimmed and has_word(trimmed):    # keep the trim only if it leaves a valid example
             example = trimmed
         resp["example"] = example
-        resp["example_en"] = next(
-            (l[:160] for l in lines[ex_idx + 1:] if _mostly_ascii(l)), "")
+        en = next((l[:160] for l in lines[ex_idx + 1:] if _mostly_ascii(l)), "")
+        if not en:
+            # the model glued or skipped the translation — a dedicated temp-0
+            # call guarantees the card never lands without its English
+            en = translate_user_to_english(example)
+        resp["example_en"] = en
     if not gloss:
         head = lines[:ex_idx] if ex_idx is not None else lines
         resp["gloss"] = next((l[:80] for l in head if _mostly_ascii(l)), "")
@@ -928,19 +949,31 @@ def gen_passage(topic: str, level_label: str = "HSK 5"):
     yield _reading_shell(
         f'<div class="rd-loading">正在写一篇关于“{html.escape(topic)}”的文章…<br>'
         f'writing a passage about “{html.escape(topic)}”…</div>')
-    # The passage is built from TWO generations and joined. Asked for one
-    # ~240-char passage in one call, the fine-tuned model snaps back to its
-    # trained reply length no matter how the length is phrased (87–153 chars
-    # across four prompt variants, measured) — so each half gets its own
-    # reply-sized call instead, the same fight-the-prior-with-another-call
-    # pattern as fill_translations.
+    # The passage is built from FOUR small generations, each one simple enough
+    # to be reliable:
+    #   1. first half (plain text)   — asked for ~240 chars in ONE call, the
+    #      fine-tuned model snaps back to its trained reply length (87–153
+    #      measured across four prompt phrasings), so each half gets its own
+    #      reply-sized call;
+    #   2. second half (plain text)  — a big do-everything JSON call was tried
+    #      and the model kept mangling the structure (questions glued outside
+    #      the object), losing otherwise-good passages;
+    #   3. questions (small JSON ARRAY — extract_json_array can salvage a
+    #      broken closing bracket, and a failure here degrades to a passage
+    #      without questions instead of no passage);
+    #   4. translation of the FINAL text at temperature 0 — translated
+    #      alongside the halves it drifted from what the passage actually
+    #      says (user-reported).
+    level_rule = (
+        f"用HSK{level}或以下的词汇和语法，并尽量用上一些HSK{level}水平的词语"
+        "（不要全是简单词）。不要拼音，不要换行。"
+    )
     half_prompt = (
         f"为一个HSK{level}水平的学生写一篇约240字的中文阅读文章的【前半部分】，"
         f"主题是“{topic}”。\n"
         "- 前半大约120字：先引入话题，再开始讲一个具体的经历或例子，"
         "讲到一半停下（后半部分会接着写）。\n"
-        f"- 用HSK{level}或以下的词汇和语法，并尽量用上一些HSK{level}水平的词语"
-        "（不要全是简单词）。不要拼音，不要换行。\n"
+        f"- {level_rule}\n"
         "只返回前半部分的正文，不要标题，不要解释。"
     )
     try:
@@ -951,29 +984,31 @@ def gen_passage(topic: str, level_label: str = "HSK 5"):
         finish_prompt = (
             f"下面是一篇给HSK{level}水平学生的中文阅读文章的前半部分（主题：{topic}）：\n"
             f"{part1}\n\n"
-            "请完成三件事：\n"
-            "1. 写出文章的【后半部分】，大约120字：接着前半继续讲（不要重新开头），"
-            f"补充细节，最后总结或给出看法。用HSK{level}或以下的词汇和语法，"
-            "不要拼音，不要换行。\n"
-            "2. 出3个中文理解问题，每个配一个简短的中文参考答案。\n"
-            "只返回一个JSON对象，所有字符串写在一行内（不要换行）：\n"
-            '{"title":"标题","part2":"文章后半",'
-            '"questions":[{"q":"问题","a":"答案"},{"q":"…","a":"…"},{"q":"…","a":"…"}]}\n'
-            "不要解释，不要用markdown。"
+            "请写出文章的【后半部分】，大约120字：接着前半继续讲（不要重新开头），"
+            f"补充细节，最后总结或给出看法。{level_rule}\n"
+            "只返回后半部分的正文，不要标题，不要解释。"
         )
-        out = generate([{"role": "user", "content": finish_prompt}],
-                       temperature=0.8, max_tokens=1024)
-        data = extract_json_object(out)
-        passage = part1 + str(data.get("part2", "")).strip().strip('"“”')
-        if not passage:
-            raise ValueError("empty passage")
-        questions = [q for q in data.get("questions", []) if isinstance(q, dict) and q.get("q")]
-        # the translation gets its OWN temperature-0 call from the FINAL joined
-        # text — written alongside part2 in the same generation, it drifted from
-        # what the passage actually says (user-reported)
+        part2 = generate([{"role": "user", "content": finish_prompt}],
+                         temperature=0.8, max_tokens=400).strip().strip('"“”')
+        passage = part1 + part2 if HAS_CJK.search(part2) else part1
+        # the translation gets its OWN temperature-0 call from the FINAL joined text
         translation = translate_user_to_english(passage, max_tokens=500, max_chars=1200)
-        yield _reading_shell(_render_passage(
-            str(data.get("title", topic)).strip(), passage, translation, questions))
+        questions = []
+        try:
+            q_prompt = (
+                f"根据下面这篇短文，出3个中文理解问题，每个配一个简短的中文参考答案。\n\n"
+                f"{passage}\n\n"
+                '只返回一个JSON数组，所有字符串写在一行内：\n'
+                '[{"q":"问题","a":"答案"},{"q":"…","a":"…"},{"q":"…","a":"…"}]\n'
+                "不要解释，不要用markdown。"
+            )
+            q_out = generate([{"role": "user", "content": q_prompt}],
+                             temperature=0.7, max_tokens=400)
+            questions = [q for q in extract_json_array(q_out)
+                         if isinstance(q, dict) and q.get("q")]
+        except Exception:  # noqa: BLE001 — a passage without questions beats no passage
+            pass
+        yield _reading_shell(_render_passage(topic, passage, translation, questions))
     except Exception as e:  # noqa: BLE001 — a failed passage is retryable via the button
         yield _reading_shell(
             '<div class="rd-loading">这篇没写成，请再点一次“生成短文”。<br>'
