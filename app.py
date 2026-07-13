@@ -1554,22 +1554,35 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
     # English word alone — otherwise 聊天 would round-trip the student's own Chinese.
     _latin = len(re.findall(r"[A-Za-z]", user_msg))
     english_prompt = _latin >= 4 and _latin >= len(HAS_CJK.findall(user_msg))
-    # the mirror: a Chinese message gets its English beneath (translated in the
-    # annotation pass — see below), so the student can check they said what they
-    # meant. Same ≥4-char bar as english_prompt; a real sentence, not a 你好.
+    # the mirror: a Chinese message gets its English beneath. Same ≥4-char bar as
+    # english_prompt; a real sentence, not a 你好.
     chinese_prompt = not english_prompt and len(HAS_CJK.findall(user_msg)) >= 4
-    if conversational and english_prompt:
-        # the conversation must stay Chinese for the MODEL — English input makes
-        # the tutor drift into translating/evaluating instead of conversing. The
-        # student's English is translated first and the model sees the Chinese;
-        # the bubble shows what they typed, with the annotated Chinese beneath.
+    raw = raw + [user_turn]
+    # the message lands in the transcript immediately, and its translation is
+    # rendered BEFORE the reply generates (user preference: see the translation
+    # first) — at the cost of one translation call (~1–2s) before streaming starts
+    yield (render_chat(raw), raw, "", targets, bar())
+    if english_prompt:
+        # English input → its Chinese beneath. In 聊天 mode the MODEL must also
+        # see the Chinese instead of the English — English input makes the tutor
+        # drift into translating/evaluating instead of conversing.
         zh = translate_user_to_chinese(user_msg)
         if zh:
             msg_lines = user_msg.split("\n")
             idx = max((i for i, l in enumerate(msg_lines) if l.strip()), default=0)
-            user_turn = {"role": "user", "content": zh, "display": user_msg,
-                         "fills": {idx: zh}}
-    raw = raw + [user_turn]
+            user_turn["fills"] = {idx: zh}
+            if conversational:
+                user_turn["content"] = zh
+                user_turn["display"] = user_msg
+    elif chinese_prompt:
+        # Chinese input → its English beneath ("did I say what I meant?")
+        en = translate_user_to_english(user_msg)
+        if en:
+            msg_lines = user_msg.split("\n")
+            idx = max((i for i, l in enumerate(msg_lines) if l.strip()), default=0)
+            user_turn["fills"] = {idx: en}
+    if user_turn.get("fills"):
+        yield (render_chat(raw), raw, "", targets, bar())
     messages = [{"role": "system", "content": system}] + strip_for_llm(raw)
 
     # history annotated once; the in-progress reply rides in a plain bubble
@@ -1619,9 +1632,10 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
             reply = translate_user_to_chinese(reply, max_tokens=300) or reply
     raw = raw + [{"role": "assistant", "content": reply}]
 
-    # reading-layer pass: sense picks, translation fills, prompt translation.
-    # disambiguate sees what the transcript shows — raw[-2]["content"] is the
-    # Chinese translation when the student typed English in 聊天 mode.
+    # reading-layer pass: sense picks + reply translation fills (the INPUT
+    # translation already happened before generation). disambiguate sees what
+    # the transcript shows — raw[-2]["content"] is the Chinese translation when
+    # the student typed English in 聊天 mode.
     yield (with_stream_bubble(reply, note="加注中 annotating"), raw, "", targets, bar())
     ov = disambiguate([raw[-2]["content"], reply])
     if ov:
@@ -1635,24 +1649,8 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
     fills = fill_translations(reply)
     if fills:
         raw[-1]["fills"] = fills
-    # a Q&A English prompt gets its Chinese under the student's bubble — keyed to
-    # the last NON-EMPTY line (a trailing newline must not detach it). In 聊天 mode
-    # this already happened before generation, so only Q&A needs it here.
-    if not conversational and english_prompt:
-        zh = translate_user_to_chinese(user_msg)
-        if zh:
-            msg_lines = user_msg.split("\n")
-            idx = max((i for i, l in enumerate(msg_lines) if l.strip()), default=0)
-            raw[-2]["fills"] = {idx: zh}
-    # a Chinese prompt gets its English beneath, in BOTH modes — the mirror of
-    # the English→Chinese fill above (chinese_prompt excludes english_prompt,
-    # so this never clashes with the 聊天 pre-translation fills)
-    if chinese_prompt:
-        en = translate_user_to_english(user_msg)
-        if en:
-            msg_lines = user_msg.split("\n")
-            idx = max((i for i, l in enumerate(msg_lines) if l.strip()), default=0)
-            raw[-2]["fills"] = {idx: en}
+    # (input translations — English→Chinese and Chinese→English — happen BEFORE
+    # generation now, so the student sees them first; nothing to add here)
     yield (render_chat(raw), raw, "", targets, bar())
 
 
