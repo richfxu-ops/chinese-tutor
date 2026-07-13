@@ -14,6 +14,8 @@ shows the ANNOTATED HTML. That separation is why the state plumbing below exists
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import html
 import json
 import os
@@ -473,6 +475,10 @@ button[role="tab"][aria-selected="true"] {{
 .rd-a {{ margin-top:.55rem; padding:.55rem .85rem; background:var(--wash);
         border-left:2px solid var(--cinnabar); border-radius:2px;
         font-family:var(--hanzi-kai); font-size:1.03rem; line-height:2.2; color:var(--ink); }}
+
+/* 🔊 waiting on the neural clip from the server */
+.spk-loading {{ opacity:.45; animation:spk-pulse 1s ease-in-out infinite; }}
+@keyframes spk-pulse {{ 50% {{ opacity:.95; }} }}
 """
 
 # Page JS, run once at load. Injected via launch(head=...) as a self-invoking
@@ -752,22 +758,68 @@ APP_JS = """
     if (e.target.closest('#ask textarea')) syncDeckWords();
   });
 
-  // Browser TTS (same voice logic as web/flashcards.html): each tutor bubble
-  // has a .spk button whose data-speak carries the Chinese-only text.
+  // ---- Text-to-speech: neural (edge-tts via the server) with a browser fallback.
+  // Each .spk button's data-speak carries the Chinese-only text. A click asks the
+  // server (#tts-req) for an MP3; the reply lands in #tts-res and plays. If the
+  // server can't (offline / edge-tts missing / slow), we use the browser voice.
   let zhVoice = null;
   const pickVoice = () => {
     const vs = window.speechSynthesis ? speechSynthesis.getVoices() : [];
     zhVoice = vs.find(v => /^zh/i.test(v.lang)) || null;
   };
   if (window.speechSynthesis) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
+  let ttsAudio = null, ttsPending = null, ttsNonce = 0, ttsSpeaking = false;
+  const browserSpeak = (text) => {
+    if (!window.speechSynthesis || !text) return;
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'zh-CN'; u.rate = 0.9; if (zhVoice) u.voice = zhVoice;
+    u.onend = u.onerror = () => { ttsSpeaking = false; };
+    ttsSpeaking = true;
+    speechSynthesis.speak(u);
+  };
+  const stopTts = () => {
+    if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
+    if (window.speechSynthesis) speechSynthesis.cancel();
+    ttsSpeaking = false;
+    if (ttsPending) { ttsPending.btn.classList.remove('spk-loading'); ttsPending = null; }
+  };
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('.spk');
-    if (!btn || !window.speechSynthesis) return;
-    if (speechSynthesis.speaking) { speechSynthesis.cancel(); return; }   // click again to stop
-    const u = new SpeechSynthesisUtterance(btn.dataset.speak || '');
-    u.lang = 'zh-CN'; u.rate = 0.9; if (zhVoice) u.voice = zhVoice;
-    speechSynthesis.speak(u);
+    if (!btn) return;
+    // something OF OURS already playing or pending? this click just stops it.
+    // We track our own ttsSpeaking flag instead of speechSynthesis.speaking,
+    // which can read spuriously-true (e.g. no audio device) and wedge the guard.
+    if (ttsAudio || ttsPending || ttsSpeaking) {
+      stopTts();
+      return;
+    }
+    const text = btn.dataset.speak || '';
+    if (!text) return;
+    const ta = document.querySelector('#tts-req textarea');
+    if (!ta) { browserSpeak(text); return; }            // channel not mounted -> browser
+    const id = ++ttsNonce;
+    ttsPending = { id, btn };
+    btn.classList.add('spk-loading');
+    setNative(ta, JSON.stringify({ id, text }));
+    setTimeout(() => {                                   // server too slow -> browser
+      if (ttsPending && ttsPending.id === id) { stopTts(); browserSpeak(text); }
+    }, 6000);
   });
+  let lastTtsRes = '';
+  const checkTtsRes = () => {
+    const el = document.getElementById('tts-res');
+    const t = el ? el.textContent.trim() : '';
+    if (!t || t === lastTtsRes) return;
+    lastTtsRes = t;
+    let res; try { res = JSON.parse(t); } catch { return; }
+    if (!ttsPending || res.id !== ttsPending.id) return;   // stale / superseded
+    const btn = ttsPending.btn; ttsPending = null;
+    btn.classList.remove('spk-loading');
+    if (res.fail || !res.audio) { browserSpeak(btn.dataset.speak || ''); return; }
+    ttsAudio = new Audio(res.audio);
+    ttsAudio.onended = ttsAudio.onerror = () => { ttsAudio = null; };
+    ttsAudio.play().catch(() => { ttsAudio = null; browserSpeak(btn.dataset.speak || ''); });
+  };
 
   // ---- voice input: Web Speech API (Chrome; the button only appears when the
   // API exists). Click to talk in Mandarin — interim results stream into the
@@ -939,6 +991,7 @@ APP_JS = """
       ensureMic();
       checkCardRes();
       checkStartersRes();
+      checkTtsRes();
       const chat = document.querySelector('.chat');
       if (!chat) return;
       if (chat.childElementCount !== lastCount) {
@@ -1660,6 +1713,60 @@ def gen_passage(topic: str):
             f"({html.escape(str(e)[:50])})</div>")
 
 
+# --------------------------------------------------------------------------- #
+# Neural TTS: a 🔊 click asks the server for a Microsoft neural zh-CN voice clip
+# (edge-tts, free, no key), returned as an MP3 data URI. Client plays it and
+# falls back to the browser voice on any failure (offline / package missing).
+# Independent of the llm — never touches _LLM_LOCK.
+# --------------------------------------------------------------------------- #
+TTS_VOICE = "zh-CN-XiaoxiaoNeural"
+_TTS_CACHE: dict[str, str] = {}        # text -> data URI (repeated review lines are instant)
+_TTS_CACHE_MAX = 200
+
+
+def _synth_bytes(text: str, voice: str) -> bytes:
+    """MP3 bytes for `text` — a blocking wrapper around edge-tts's async API.
+    Lazy-imports edge_tts so a missing package degrades to browser TTS, not a
+    broken app import. Runs in Gradio's worker thread (no running loop), so
+    asyncio.run is safe."""
+    import edge_tts
+
+    async def run() -> bytes:
+        buf = bytearray()
+        async for chunk in edge_tts.Communicate(text, voice).stream():
+            if chunk["type"] == "audio":
+                buf += chunk["data"]
+        return bytes(buf)
+
+    return asyncio.run(run())
+
+
+def synth_tts(req_json: str) -> str:
+    """TTS channel: {id, text} -> escaped JSON {id, audio: data-URI} (or
+    {id, fail: true} so the client uses the browser voice)."""
+    try:
+        req = json.loads(req_json)
+        text, rid = (req.get("text") or "").strip(), req.get("id")
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        return ""
+    if not text or rid is None:
+        return ""
+    uri = _TTS_CACHE.get(text)
+    if uri is None:
+        try:
+            audio = _synth_bytes(text, TTS_VOICE)
+            if not audio:
+                raise ValueError("empty audio")
+            uri = "data:audio/mpeg;base64," + base64.b64encode(audio).decode("ascii")
+            if len(_TTS_CACHE) >= _TTS_CACHE_MAX:
+                _TTS_CACHE.pop(next(iter(_TTS_CACHE)))     # FIFO evict oldest
+            _TTS_CACHE[text] = uri
+        except Exception as e:  # noqa: BLE001 — no network / missing pkg -> browser fallback
+            print(f"tts: neural synth failed ({e}); client falls back to browser voice", flush=True)
+            return html.escape(json.dumps({"id": rid, "fail": True}))
+    return html.escape(json.dumps({"id": rid, "audio": uri}, ensure_ascii=False))
+
+
 with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
     gr.HTML(HEADER_HTML)
     with gr.Tab("对话 · chat"):
@@ -1691,6 +1798,12 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
                               show_label=False, container=False)
         card_res = gr.HTML("", elem_id="card-res", elem_classes=["hidden-input"])
         card_req.change(gen_card_example, card_req, card_res)
+        # Neural TTS channel: a 🔊 click writes {id,text} here; synth_tts returns
+        # an MP3 data URI (or {fail}) that APP_JS plays or falls back from.
+        tts_req = gr.Textbox("", elem_id="tts-req", elem_classes=["hidden-input"],
+                             show_label=False, container=False)
+        tts_res = gr.HTML("", elem_id="tts-res", elem_classes=["hidden-input"])
+        tts_req.change(synth_tts, tts_req, tts_res)
         # File-backed deck: every deck change is pushed here (debounced) and
         # written to data/deck.json; #deck-file carries the file back on load.
         deck_save = gr.Textbox("", elem_id="deck-save", elem_classes=["hidden-input"],

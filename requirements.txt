@@ -11,3 +11,6 @@ llama-cpp-python>=0.3.0
 pypinyin>=0.53
 jieba>=0.42
 certifi>=2024.0        # get_cedict.py TLS on python.org macOS builds
+# Neural TTS for the 🔊 buttons — Microsoft's free zh-CN neural voice (no key).
+# Needs internet; the app falls back to the browser voice offline.
+edge-tts>=6.1
