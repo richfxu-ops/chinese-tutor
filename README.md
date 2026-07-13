@@ -6,7 +6,13 @@ Fine-tune **Qwen2.5-14B-Instruct** into a patient HSK-5-level Mandarin tutor wit
 
 ## What it does
 
-Chat in Chinese (or English when stuck). The tutor answers at HSK-5 level across **six tasks**:
+Chat in Chinese (or English when stuck) — every message you send gets its
+translation beneath it, and every reply is **fully bilingual** with **pinyin over
+each character** and a **hover gloss on each word**. The reading layer is rendered
+deterministically app-side (`pypinyin` + `jieba` + CC-CEDICT), not by the model,
+so the pinyin is always correct.
+
+**问答 Q&A mode** answers at HSK-5 level across six tasks:
 
 | Task | You ask | It does |
 |---|---|---|
@@ -17,7 +23,25 @@ Chat in Chinese (or English when stuck). The tutor answers at HSK-5 level across
 | 对话 example dialogue | `给我一段点菜的对话` | a short natural dialogue |
 | 语法 grammar point | `怎么用"既然……就……"？` | structure + examples |
 
-Every answer is **fully bilingual**. The interface layers **pinyin over each character** and a **hover gloss on each word** — done deterministically app-side (`pypinyin` + `jieba` + CC-CEDICT), not by the model, so pinyin is always correct.
+**聊天 conversation mode** flips the dynamic: the tutor drives — it brings topics,
+shares its own take, pushes past lazy answers (还行吧…), corrects your mistakes in
+passing with a one-line why, and works your own flashcard words into the
+conversation (复习模式 targets just the cards that are due).
+
+Around the chat:
+
+- **阅读 reading practice** — the model writes a short HSK-5 passage on any topic,
+  with comprehension questions and reveal-able answers, rendered through the same
+  reading layer.
+- **Flashcards with SRS** — click any word in a chat or passage to collect it; the
+  model writes a fresh example sentence (and a definition when the dictionary has
+  none) for each card, and the tutor's corrections become cards too (your sentence
+  → fix + rule). Review with SM-2 spaced repetition, practice 写 stroke order,
+  edit cards inline, export to Anki, or ask the tutor about a card in one click.
+- **Neural voices** — every Chinese line has a 🔊 read-aloud: Microsoft zh-CN
+  neural voices (edge-tts) with a 女声/男声 pick and a speed slider, falling back
+  to the browser voice offline. Flashcards can auto-play.
+- **Voice input** — click the mic and speak Mandarin (Web Speech API, Chrome).
 
 ## How it's built
 
