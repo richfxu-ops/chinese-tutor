@@ -936,6 +936,12 @@ def _reading_shell(inner: str) -> str:
     return f'<div class="reading">{inner}</div>'
 
 
+def _rd_level_chip(level_label: str) -> str:
+    """The reading tab's level indicator — mirrors the chat tab's selector
+    (wired to level_pick.change) so the generating level is visible here."""
+    return f'<span class="rd-level">水平 · {html.escape(str(level_label))}</span>'
+
+
 def _render_passage(title: str, passage: str, translation: str, questions: list) -> str:
     """Annotated passage (collectible words + hover gloss + a 🔊), the English
     translation, and comprehension questions with reveal-on-click answers."""
@@ -961,8 +967,8 @@ def gen_passage(topic: str, level_label: str = "HSK 5"):
     level = _level_num(level_label)
     topic = (topic or "").strip() or random.choice(c.CONV_TOPICS)
     yield _reading_shell(
-        f'<div class="rd-loading">正在写一篇关于“{html.escape(topic)}”的文章…<br>'
-        f'writing a passage about “{html.escape(topic)}”…</div>')
+        f'<div class="rd-loading">正在写一篇关于“{html.escape(topic)}”的 HSK {level} 文章…<br>'
+        f'writing an HSK {level} passage about “{html.escape(topic)}”…</div>')
     # The passage is built from FOUR small generations, each one simple enough
     # to be reliable:
     #   1. first half (plain text)   — asked for ~240 chars in ONE call, the
@@ -1200,12 +1206,16 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
                 placeholder="主题，可留空随机 · topic (blank = random)",
                 show_label=False, container=False, elem_id="rd-topic", scale=5)
             rd_btn = gr.Button("生成短文 · new passage", elem_id="rd-btn", scale=1)
+            # live mirror of the chat tab's level selector, so you can see which
+            # level the next passage will use without switching tabs
+            rd_level = gr.HTML(_rd_level_chip("HSK 5"), elem_id="rd-level-box")
         rd_out = gr.HTML(_reading_shell(
             '<div class="rd-loading">点“生成短文”，我会按你选的HSK水平写一篇文章和几个理解问题。<br>'
-            'Click “new passage” for an HSK-5 reading with comprehension questions.<br>'
+            'Click “new passage” for a reading at your selected HSK level, with comprehension questions.<br>'
             '每个词都能悬停看释义、点一下收藏 · hover any word for its meaning, click to save it.</div>'))
         rd_btn.click(gen_passage, [rd_topic, level_pick], rd_out)
         rd_topic.submit(gen_passage, [rd_topic, level_pick], rd_out)
+        level_pick.change(_rd_level_chip, level_pick, rd_level)
     with gr.Tab("卡片 · flashcards"):
         gr.HTML(flashcards_srcdoc())
     with gr.Tab("词表 · word list"):

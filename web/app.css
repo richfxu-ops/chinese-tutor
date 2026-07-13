@@ -338,6 +338,12 @@ button[role="tab"][aria-selected="true"] {
 #rd-btn { background:var(--cinnabar) !important; color:var(--sheet) !important;
           border:none !important; border-radius:3px !important; white-space:nowrap; flex:none !important; }
 #rd-btn:hover { background:var(--cinnabar-deep) !important; }
+/* the level indicator (mirrors the chat tab's selector; change it there) */
+#rd-level-box { flex:0 0 auto !important; width:auto !important; min-width:0 !important; }
+.rd-level { font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.66rem;
+            letter-spacing:.1em; text-transform:uppercase; color:var(--cinnabar);
+            border:1px solid var(--cinnabar); border-radius:2px; padding:.3rem .6rem;
+            white-space:nowrap; }
 .reading {
   background:var(--sheet); border:1px solid var(--hairline); border-radius:4px;
   box-shadow:0 1px 3px rgba(60,48,30,.08), 0 14px 34px -22px rgba(60,48,30,.35);
