@@ -101,12 +101,15 @@ _Filled from `outputs/eval_report.md` after a training run._
 
 ## Roadmap (v2)
 
-- **Text-to-speech** — a 🔊 button that reads the tutor's Chinese aloud.
-- **Voice chat** — speak your Chinese, transcribed via Whisper-class ASR.
+- **Voice chat** — full spoken conversation via Whisper-class ASR. (Voice *input*
+  already works — the mic button — and the tutor already reads replies aloud with
+  a neural 🔊 voice; this would close the loop.)
+- **Curriculum coach** — Claude plans what to drill into a `curriculum.md` the
+  app injects into the tutor's prompt (planner + executor, no retraining).
 
 ## Notes & attribution
 
-- **Base model:** [Qwen2.5-7B-Instruct](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct) (Apache-2.0).
+- **Base model:** [Qwen2.5-14B-Instruct](https://huggingface.co/Qwen/Qwen2.5-14B-Instruct) (Apache-2.0).
 - **Dictionary:** [CC-CEDICT](https://www.mdbg.net/chinese/dictionary?page=cc-cedict), CC-BY-SA 4.0 — fetched by `get_cedict.py`, not committed.
 - Hover glosses are dictionary lookups on segmented words, so they're occasionally context-off (e.g. 早点 "breakfast" vs. "a bit earlier"); the pinyin is always correct.
-- Free HF Spaces can't host a 7B — the demo is local. A public Space would need a paid GPU.
+- Free HF Spaces can't host a 14B — the demo is local. A public Space would need a paid GPU.
