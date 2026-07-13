@@ -371,7 +371,20 @@ button[role="tab"][aria-selected="true"] {{
 #review-mode .label-text {{ font-family:"IBM Plex Mono",ui-monospace,monospace !important;
                            font-size:.68rem !important; letter-spacing:.1em;
                            text-transform:uppercase; color:var(--ink-soft) !important; }}
-#review-mode input {{ accent-color:var(--cinnabar); }}
+/* transparent outlined box when off (the native fill rendered dark on paper),
+   cinnabar with a check when on */
+#review-mode input {{
+  appearance:none !important; -webkit-appearance:none !important;
+  width:14px !important; height:14px !important; flex:none;
+  border:1px solid var(--hairline) !important; border-radius:2px !important;
+  background:transparent !important; box-shadow:none !important;
+  cursor:pointer; position:relative; vertical-align:middle;
+}}
+#review-mode input:checked {{ background:var(--cinnabar) !important; border-color:var(--cinnabar) !important; }}
+#review-mode input:checked::after {{
+  content:""; position:absolute; left:4px; top:1px; width:3px; height:7px;
+  border:solid var(--sheet); border-width:0 2px 2px 0; transform:rotate(45deg);
+}}
 #mode {{ margin:.15rem 0 .1rem; }}
 #mode label {{
   background:transparent !important; border:1px solid var(--hairline) !important;
@@ -385,6 +398,35 @@ button[role="tab"][aria-selected="true"] {{
   background:var(--sheet) !important;
 }}
 #mode input {{ display:none; }}
+
+/* 🔊 voice picker + speed slider — its own row; cluster everything inline on the
+   left. Gradio row children default to flex-grow, which spread them apart (the
+   slider floated off to the right / wrapped to a second line). */
+#voice-row {{ align-items:center; gap:.9rem; margin:.1rem 0 .25rem;
+             justify-content:flex-start; flex-wrap:wrap; }}
+#voice-row > * {{ flex:0 0 auto !important; width:auto !important; min-width:0 !important; }}
+#voice-row::before {{ content:"🔊 语音"; font-family:"IBM Plex Mono",ui-monospace,monospace;
+                     font-size:.6rem; letter-spacing:.13em; text-transform:uppercase;
+                     color:var(--ink-soft); align-self:center; flex:0 0 auto; }}
+#voice-pick {{ margin:0; }}
+#voice-pick label {{
+  background:transparent !important; border:1px solid var(--hairline) !important;
+  border-radius:2px !important; color:var(--ink-soft) !important;
+  font-family:"IBM Plex Mono",ui-monospace,monospace !important; font-size:.66rem !important;
+  letter-spacing:.08em; padding:.3rem .6rem !important; box-shadow:none !important; cursor:pointer;
+}}
+#voice-pick label.selected {{
+  color:var(--cinnabar) !important; border-color:var(--cinnabar) !important; background:var(--sheet) !important;
+}}
+#voice-pick input {{ display:none; }}
+
+/* 🔊 playback-speed slider (plain HTML range) */
+#speed-ctl {{ display:flex; align-items:center; gap:.5rem; }}
+.speed-label {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.6rem;
+               letter-spacing:.1em; text-transform:uppercase; color:var(--ink-soft); }}
+#tts-speed {{ width:104px; accent-color:var(--cinnabar); cursor:pointer; vertical-align:middle; }}
+#speed-val {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.72rem;
+             color:var(--cinnabar); min-width:2.6em; }}
 
 /* ---------- word-list tab ---------- */
 .wl-head {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.68rem;
@@ -769,10 +811,22 @@ APP_JS = """
   };
   if (window.speechSynthesis) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
   let ttsAudio = null, ttsPending = null, ttsNonce = 0, ttsSpeaking = false;
+  const ttsRate = () => {
+    const s = document.getElementById('tts-speed');
+    const v = s ? parseFloat(s.value) : 1;
+    return (v >= 0.5 && v <= 2) ? v : 1;
+  };
+  document.addEventListener('input', (e) => {
+    if (e.target.id !== 'tts-speed') return;
+    const v = ttsRate();
+    const lbl = document.getElementById('speed-val');
+    if (lbl) lbl.textContent = v.toFixed(1) + '×';
+    if (ttsAudio) ttsAudio.playbackRate = v;      // live-adjust a clip already playing
+  });
   const browserSpeak = (text) => {
     if (!window.speechSynthesis || !text) return;
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'zh-CN'; u.rate = 0.9; if (zhVoice) u.voice = zhVoice;
+    u.lang = 'zh-CN'; u.rate = ttsRate(); if (zhVoice) u.voice = zhVoice;
     u.onend = u.onerror = () => { ttsSpeaking = false; };
     ttsSpeaking = true;
     speechSynthesis.speak(u);
@@ -817,6 +871,8 @@ APP_JS = """
     btn.classList.remove('spk-loading');
     if (res.fail || !res.audio) { browserSpeak(btn.dataset.speak || ''); return; }
     ttsAudio = new Audio(res.audio);
+    try { ttsAudio.preservesPitch = true; } catch (_) {}   // speed change keeps pitch
+    ttsAudio.playbackRate = ttsRate();
     ttsAudio.onended = ttsAudio.onerror = () => { ttsAudio = null; };
     ttsAudio.play().catch(() => { ttsAudio = null; browserSpeak(btn.dataset.speak || ''); });
   };
@@ -1719,8 +1775,11 @@ def gen_passage(topic: str):
 # falls back to the browser voice on any failure (offline / package missing).
 # Independent of the llm — never touches _LLM_LOCK.
 # --------------------------------------------------------------------------- #
-TTS_VOICE = "zh-CN-XiaoxiaoNeural"
-_TTS_CACHE: dict[str, str] = {}        # text -> data URI (repeated review lines are instant)
+# UI voice key -> edge-tts zh-CN neural voice. synth_tts derives the key from the
+# voice_pick radio's label (a second input to that event); default female.
+TTS_VOICES = {"female": "zh-CN-XiaoxiaoNeural", "male": "zh-CN-YunxiNeural"}
+TTS_VOICE_DEFAULT = "female"
+_TTS_CACHE: dict[tuple[str, str], str] = {}    # (voice, text) -> data URI; repeats are instant
 _TTS_CACHE_MAX = 200
 
 
@@ -1741,9 +1800,11 @@ def _synth_bytes(text: str, voice: str) -> bytes:
     return asyncio.run(run())
 
 
-def synth_tts(req_json: str) -> str:
-    """TTS channel: {id, text} -> escaped JSON {id, audio: data-URI} (or
-    {id, fail: true} so the client uses the browser voice)."""
+def synth_tts(req_json: str, voice_label: str = "") -> str:
+    """TTS channel: {id, text} + the voice_pick radio's label -> escaped JSON
+    {id, audio: data-URI} (or {id, fail: true} so the client uses the browser
+    voice). The voice comes from the voice_pick component (a second input to this
+    event), which is also what makes that radio interactive."""
     try:
         req = json.loads(req_json)
         text, rid = (req.get("text") or "").strip(), req.get("id")
@@ -1751,16 +1812,18 @@ def synth_tts(req_json: str) -> str:
         return ""
     if not text or rid is None:
         return ""
-    uri = _TTS_CACHE.get(text)
+    vkey = "male" if "男" in (voice_label or "") else TTS_VOICE_DEFAULT
+    key = (vkey, text)
+    uri = _TTS_CACHE.get(key)
     if uri is None:
         try:
-            audio = _synth_bytes(text, TTS_VOICE)
+            audio = _synth_bytes(text, TTS_VOICES[vkey])
             if not audio:
                 raise ValueError("empty audio")
             uri = "data:audio/mpeg;base64," + base64.b64encode(audio).decode("ascii")
             if len(_TTS_CACHE) >= _TTS_CACHE_MAX:
                 _TTS_CACHE.pop(next(iter(_TTS_CACHE)))     # FIFO evict oldest
-            _TTS_CACHE[text] = uri
+            _TTS_CACHE[key] = uri
         except Exception as e:  # noqa: BLE001 — no network / missing pkg -> browser fallback
             print(f"tts: neural synth failed ({e}); client falls back to browser voice", flush=True)
             return html.escape(json.dumps({"id": rid, "fail": True}))
@@ -1783,6 +1846,25 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
                 False, label="复习模式 · target only due cards", elem_id="review-mode",
                 container=False,
             )
+        # 🔊 neural-voice pick on its OWN row — kept out of the crowded mode-row so
+        # both pills stay clickable. synth_tts reads the selection (wired below);
+        # applies to chat + reading (the flashcards iframe has its own TTS).
+        with gr.Row(elem_id="voice-row"):
+            # voice_pick feeds synth_tts (a second input to the tts event below).
+            # Being an event input is what makes a Radio interactive/clickable — a
+            # Radio wired to NO event renders display-only (its pills don't click),
+            # and interactive=True alone does NOT fix that.
+            voice_pick = gr.Radio(
+                ["女声 · female", "男声 · male"], value="女声 · female",
+                show_label=False, elem_id="voice-pick", container=False, interactive=True,
+            )
+            # Playback speed — a plain HTML range (client-only, so no Gradio event
+            # wiring needed). APP_JS scales audio.playbackRate (pitch preserved) and
+            # the browser voice's rate; live-adjusts a clip already playing.
+            gr.HTML(
+                '<div id="speed-ctl"><span class="speed-label">语速 · speed</span>'
+                '<input type="range" id="tts-speed" min="0.5" max="1.5" step="0.1" value="1">'
+                '<span id="speed-val">1.0×</span></div>')
         msg = gr.Textbox(
             placeholder="用中文或英文问我… (ask in Chinese or English)",
             show_label=False, submit_btn=True, elem_id="ask",
@@ -1803,7 +1885,7 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
         tts_req = gr.Textbox("", elem_id="tts-req", elem_classes=["hidden-input"],
                              show_label=False, container=False)
         tts_res = gr.HTML("", elem_id="tts-res", elem_classes=["hidden-input"])
-        tts_req.change(synth_tts, tts_req, tts_res)
+        tts_req.change(synth_tts, [tts_req, voice_pick], tts_res)
         # File-backed deck: every deck change is pushed here (debounced) and
         # written to data/deck.json; #deck-file carries the file back on load.
         deck_save = gr.Textbox("", elem_id="deck-save", elem_classes=["hidden-input"],
