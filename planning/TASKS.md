@@ -7,7 +7,9 @@
 - [ ] (P3) ~~Optional: deploy to HF Spaces~~ — not feasible for a 7B on free Spaces; local demo only #ship #M3
 - [ ] (P3) v2 roadmap: curriculum coach — Claude writes curriculum.md/progress.md, app.py injects into Qwen prompt (app-layer, no retrain) #roadmap
 - [ ] (P3) v2 roadmap: auto-extract vocab from a conversation (jieba ∩ CC-CEDICT) into the deck #roadmap
-- [x] Neural TTS (2026-07-13): 🔊 buttons request a Microsoft zh-CN neural clip (edge-tts, free, no key) via a hidden channel; MP3 returned as a base64 data URI, cached per line; falls back to browser speechSynthesis on failure/offline. Covers chat + reading 🔊 (flashcards iframe still browser TTS). Verified end-to-end. #ship
+- [x] Neural TTS (2026-07-13): 🔊 buttons request a Microsoft zh-CN neural clip (edge-tts, free, no key) via a hidden channel; MP3 returned as a base64 data URI, cached per (voice, line); falls back to browser speechSynthesis on failure/offline. Verified end-to-end. #ship
+- [x] TTS controls (2026-07-13): 女声/男声 voice picker + 0.5–1.5× playback-speed slider (pitch preserved, live-adjust); 复习模式 checkbox restyled transparent. #ship
+- [x] Flashcards neural TTS (2026-07-13): card 🔊/autoplay proxied to the parent's neural channel via postMessage (voice + speed respected), with its own persisted 女声/男声 toggle; browser voice standalone/fallback. Verified cross-frame end-to-end. #ship
 - [ ] (P3) v2 roadmap: voice chat — speak your Chinese, Whisper-class ASR #roadmap
 
 ## Next

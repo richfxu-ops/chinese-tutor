@@ -105,6 +105,7 @@
 
   <div class="tools">
     <button id="autobtn" onclick="toggleAutoplay()">🔊 Auto-play: off</button>
+    <button id="voicebtn" onclick="toggleVoice()">🗣 女声 female</button>
     <button onclick="exportTSV()">⤓ Export for Anki (TSV)</button>
     <button onclick="exportJSON()">⤓ Backup (JSON)</button>
     <button onclick="importJSON()">⤒ Import JSON</button>
@@ -167,12 +168,46 @@ let zhVoice = null, lastSpokenId = null;
 let autoplay = localStorage.getItem("hsk5-autoplay") === "1";
 function pickVoice(){ const vs = window.speechSynthesis ? speechSynthesis.getVoices() : []; zhVoice = vs.find(v => /^zh/i.test(v.lang)) || null; }
 if (window.speechSynthesis){ pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
-function speak(text){
+// Embedded in the app (iframe): the read-aloud buttons request a neural voice
+// from the parent (edge-tts) and fall back to the browser voice; the standalone
+// file just uses the browser voice. The parent posts the audio back below.
+const inIframe = (() => { try { return window.parent && window.parent !== window; } catch(_){ return false; } })();
+let fcAudio = null, fcPending = null, fcNonce = 0;
+// neural voice for card audio (own toggle, persisted; only meaningful when
+// embedded — standalone uses the browser voice, so the button hides)
+let fcVoice = localStorage.getItem("hsk5-voice") === "male" ? "male" : "female";
+function toggleVoice(){
+  fcVoice = fcVoice === "male" ? "female" : "male";
+  localStorage.setItem("hsk5-voice", fcVoice);
+  renderVoiceBtn();
+}
+function renderVoiceBtn(){
+  const b = document.getElementById("voicebtn");
+  if(!b) return;
+  if(!inIframe){ b.style.display = "none"; return; }
+  b.textContent = fcVoice === "male" ? "🗣 男声 male" : "🗣 女声 female";
+}
+function browserSpeak(text){
   if(!window.speechSynthesis || !text) return;
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "zh-CN"; u.rate = 0.9; if(zhVoice) u.voice = zhVoice;
   speechSynthesis.speak(u);
+}
+function stopSpeak(){
+  if(fcAudio){ fcAudio.pause(); fcAudio = null; }
+  if(window.speechSynthesis) speechSynthesis.cancel();
+  fcPending = null;
+}
+function speak(text){
+  if(!text) return;
+  stopSpeak();
+  if(!inIframe){ browserSpeak(text); return; }
+  const id = "fc" + (++fcNonce);
+  fcPending = { id, text };
+  try { parent.postMessage({ type:"tts-request", id, text, voice: fcVoice }, "*"); }
+  catch(_){ fcPending = null; browserSpeak(text); return; }
+  setTimeout(() => { if(fcPending && fcPending.id === id){ fcPending = null; browserSpeak(text); } }, 6000);
 }
 function maybeAutoSpeak(c){ if(autoplay && c && c.kind !== "fix" && c.id !== lastSpokenId){ lastSpokenId = c.id; speak(c.front); } }  // don't voice a wrong sentence
 function toggleAutoplay(){ autoplay = !autoplay; localStorage.setItem("hsk5-autoplay", autoplay?"1":"0"); renderAutoBtn(); if(autoplay && current) speak(current.front); }
@@ -454,6 +489,17 @@ window.addEventListener("storage", (e) => {
 // returns to the due queue.
 window.addEventListener("message", (e) => {
   if (e.source !== window.parent) return;
+  // neural TTS audio from the parent (edge-tts); play it or fall back to browser
+  if (e.data && e.data.type === "tts-audio" && fcPending && e.data.id === fcPending.id) {
+    const text = fcPending.text; fcPending = null;
+    if (e.data.fail || !e.data.audio) { browserSpeak(text); return; }
+    fcAudio = new Audio(e.data.audio);
+    try { fcAudio.preservesPitch = true; } catch(_){}
+    if (e.data.rate) fcAudio.playbackRate = e.data.rate;
+    fcAudio.onended = fcAudio.onerror = () => { fcAudio = null; };
+    fcAudio.play().catch(() => { fcAudio = null; browserSpeak(text); });
+    return;
+  }
   if (!e.data || e.data.type !== "show-card" || !e.data.id) return;
   deck = load();                        // parent may have just edited a card
   const card = deck.find(c => c.id === e.data.id);
@@ -464,6 +510,7 @@ window.addEventListener("message", (e) => {
 });
 
 renderAutoBtn();
+renderVoiceBtn();
 render();
 </script>
 </body>

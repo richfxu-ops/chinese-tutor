@@ -867,6 +867,12 @@ APP_JS = """
     lastTtsRes = t;
     let res; try { res = JSON.parse(t); } catch { return; }
     if (!ttsPending || res.id !== ttsPending.id) return;   // stale / superseded
+    if (ttsPending.iframe) {   // request came from the flashcards iframe — hand it back
+      ttsPending.iframe.postMessage({ type: 'tts-audio', id: res.id,
+        audio: res.audio || null, fail: !!(res.fail || !res.audio), rate: ttsRate() }, '*');
+      ttsPending = null;
+      return;
+    }
     const btn = ttsPending.btn; ttsPending = null;
     btn.classList.remove('spk-loading');
     if (res.fail || !res.audio) { browserSpeak(btn.dataset.speak || ''); return; }
@@ -989,8 +995,19 @@ APP_JS = """
   // settle (the same lead-time lesson as the focusin listener above).
   window.addEventListener('message', (e) => {
     const cards = document.querySelector('.cards-frame');
-    if (!cards || e.source !== cards.contentWindow) return;
-    if (!e.data || e.data.type !== 'ask-tutor' || typeof e.data.text !== 'string') return;
+    if (!cards || e.source !== cards.contentWindow || !e.data) return;
+    // Neural-TTS proxy for the flashcards iframe: run its request through our
+    // channel and post the audio back (at the current speed + selected voice).
+    if (e.data.type === 'tts-request' && typeof e.data.text === 'string') {
+      stopTts();
+      const ta = document.querySelector('#tts-req textarea');
+      if (!ta) { cards.contentWindow.postMessage({ type: 'tts-audio', id: e.data.id, fail: true }, '*'); return; }
+      ttsPending = { id: e.data.id, iframe: cards.contentWindow };
+      const v = (e.data.voice === 'male' || e.data.voice === 'female') ? e.data.voice : undefined;
+      setNative(ta, JSON.stringify({ id: e.data.id, text: e.data.text, voice: v }));
+      return;
+    }
+    if (e.data.type !== 'ask-tutor' || typeof e.data.text !== 'string') return;
     syncDeckWords();
     const chatTab = [...document.querySelectorAll('button[role="tab"]')]
       .find(t => t.textContent.includes('对话'));
@@ -1812,7 +1829,11 @@ def synth_tts(req_json: str, voice_label: str = "") -> str:
         return ""
     if not text or rid is None:
         return ""
-    vkey = "male" if "男" in (voice_label or "") else TTS_VOICE_DEFAULT
+    # an explicit voice in the request (the flashcards iframe sends its own
+    # toggle's choice) wins; otherwise the chat tab's voice_pick label decides
+    vkey = req.get("voice")
+    if vkey not in TTS_VOICES:
+        vkey = "male" if "男" in (voice_label or "") else TTS_VOICE_DEFAULT
     key = (vkey, text)
     uri = _TTS_CACHE.get(key)
     if uri is None:
