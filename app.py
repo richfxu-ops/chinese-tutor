@@ -431,6 +431,48 @@ button[role="tab"][aria-selected="true"] {{
   opacity:0; transform:translateY(8px); transition:all .25s ease; pointer-events:none;
 }}
 #collect-toast.show {{ opacity:1; transform:translateY(0); }}
+
+/* ---------- reading practice tab ---------- */
+#rd-controls {{ display:flex; gap:.6rem; align-items:center; margin:.4rem 0 1.1rem; }}
+#rd-topic textarea {{
+  background:var(--sheet) !important; border:1px solid var(--hairline) !important;
+  border-radius:3px !important; box-shadow:none !important;
+  font-family:"EB Garamond",var(--hanzi-kai) !important; font-size:1.02rem !important;
+  color:var(--ink) !important;
+}}
+#rd-topic textarea:focus {{ border-color:var(--cinnabar) !important;
+                          box-shadow:0 0 0 3px rgba(179,48,42,.14) !important; }}
+#rd-btn {{ background:var(--cinnabar) !important; color:var(--sheet) !important;
+          border:none !important; border-radius:3px !important; white-space:nowrap; flex:none !important; }}
+#rd-btn:hover {{ background:var(--cinnabar-deep) !important; }}
+.reading {{
+  background:var(--sheet); border:1px solid var(--hairline); border-radius:4px;
+  box-shadow:0 1px 3px rgba(60,48,30,.08), 0 14px 34px -22px rgba(60,48,30,.35);
+  padding:1.6rem 1.8rem 2rem;
+}}
+.rd-loading {{ color:var(--ink-soft); text-align:center; padding:2.2rem 1rem;
+              font-family:var(--hanzi-kai); font-size:1.05rem; line-height:2.1; }}
+.rd-title {{ font-family:var(--hanzi-serif); font-size:1.45rem; color:var(--ink);
+            border-bottom:2px solid var(--hairline); padding-bottom:.55rem; margin-bottom:1.1rem; }}
+.rd-passage {{ font-family:"EB Garamond",var(--hanzi-kai); font-size:1.18rem; line-height:2.7;
+              color:var(--ink); text-indent:2em; }}
+.rd-passage rt {{ color:var(--cinnabar) !important; }}
+.rd-trans {{ margin-top:1.3rem; padding-top:1rem; border-top:1px dashed var(--hairline);
+            font-family:"EB Garamond",serif; font-size:1rem; line-height:1.75;
+            color:var(--ink-soft); font-style:italic; }}
+.rd-qs {{ margin-top:1.7rem; }}
+.rd-qs-h {{ font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.63rem;
+           letter-spacing:.15em; text-transform:uppercase; color:var(--ink-soft); margin-bottom:.9rem; }}
+.rd-q {{ margin-bottom:1.1rem; }}
+.rd-qtext {{ font-family:var(--hanzi-kai); font-size:1.08rem; color:var(--ink); line-height:2.3; }}
+.rd-reveal {{ margin-top:.4rem; background:transparent; border:1px dotted var(--cinnabar);
+             border-radius:2px; color:var(--cinnabar); cursor:pointer;
+             font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.64rem;
+             letter-spacing:.08em; padding:.28rem .6rem; transition:all .15s ease; }}
+.rd-reveal:hover {{ background:var(--wash); border-style:solid; }}
+.rd-a {{ margin-top:.55rem; padding:.55rem .85rem; background:var(--wash);
+        border-left:2px solid var(--cinnabar); border-radius:2px;
+        font-family:var(--hanzi-kai); font-size:1.03rem; line-height:2.2; color:var(--ink); }}
 """
 
 # Page JS, run once at load. Injected via launch(head=...) as a self-invoking
@@ -483,7 +525,7 @@ APP_JS = """
     // placeholder example: the sentence around the word, from the same bubble —
     // must be mostly Chinese (a quoted word inside an English sentence used to
     // slip through). Replaced by a model-written example via #card-req below.
-    const msg = hz.closest('.msg');
+    const msg = hz.closest('.msg, .rd-passage');
     const sentence = msg
       ? (plainText(msg).match(/[^。！？!?\\n]*[。！？!?]?/g) || []).find(s =>
           s.includes(front) && (s.match(/[一-鿿]/g) || []).length / s.trim().length > 0.4)
@@ -820,6 +862,16 @@ APP_JS = """
     ta.focus();
   });
 
+  // reading tab: reveal / hide a comprehension answer
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.rd-reveal');
+    if (!btn) return;
+    const a = btn.parentElement.querySelector('.rd-a');
+    if (!a) return;
+    a.hidden = !a.hidden;
+    btn.textContent = a.hidden ? '显示答案 · show answer' : '隐藏答案 · hide answer';
+  });
+
   // 问老师 from a flashcard back (the cards iframe posts {type:'ask-tutor'}):
   // switch to the chat tab, fill the ask box, submit. Only messages from OUR
   // iframe are honored (e.source check — srcdoc frames have origin 'null', so
@@ -1139,8 +1191,11 @@ def translate_user_to_chinese(text: str, max_tokens: int = 120) -> str:
     annotated under their bubble), or a fully-English reply the conversation
     tutor should never have produced (converted before display/history)."""
     prompt = (
-        "把下面这段话翻译成自然的中文（HSK5水平的说法）。"
-        "只返回中文翻译，不要拼音，不要解释。\n\n" + text.strip()
+        "把下面这段话翻译成自然的中文（HSK5水平的说法），忠实传达原意。"
+        "这是翻译任务，不是问答——如果原文是一个问题，就翻译这个问题本身，绝对不要回答它。"
+        "比如原文问某个词或短语“用中文怎么说”，要保留这种提问的形式"
+        "（引号里的英文原样保留），不要给出答案。"
+        "只返回中文翻译，不要拼音，不要解释。\n\n原文：" + text.strip()
     )
     try:
         out = generate([{"role": "user", "content": prompt}],
@@ -1159,6 +1214,29 @@ def _spk(line: str) -> str:
             f' data-speak="{html.escape(chinese_only(line), quote=True)}">🔊</button>')
 
 
+# A run of Latin text long enough to be a translation/phrase (not a short inline
+# loanword like a quoted 'apple'), used to break a bilingual line in two.
+_EN_RUN = re.compile(r"[A-Za-z][A-Za-z0-9 ,.;:!?'’\"()/%–—-]{7,}")
+
+
+def _split_bilingual_line(line: str) -> list[str]:
+    """Break one display line so a Chinese sentence and its trailing English
+    translation don't share a line — the model sometimes glues them (or a
+    trailing 'Keep it up!'). We split only before an English run that FOLLOWS a
+    finished Chinese sentence (。！？), so an English phrase quoted mid-sentence
+    (他说“I am happy”的意思…) and short inline loanwords stay put, and an English
+    line that itself quotes a Chinese word (…take 很多 directly) is kept whole.
+    Pure-Chinese / pure-English lines pass through unchanged."""
+    if not (HAS_CJK.search(line) and _EN_RUN.search(line)):
+        return [line]
+    for mt in _EN_RUN.finditer(line):
+        head = line[:mt.start()]
+        h = head.rstrip(" 　\"“”'‘’")          # ignore quotes/spaces before the run
+        if h and h[-1] in "。！？!?" and HAS_CJK.search(h):
+            return [head.strip(" 　"), line[mt.start():].strip(" 　")]
+    return [line]
+
+
 def _render_msg(m: dict, tutor: bool) -> str:
     """A message's display HTML: annotated text line by line, a 🔊 per Chinese
     line (tutor lines, and Chinese fills anywhere), plus any filled-in
@@ -1171,10 +1249,12 @@ def _render_msg(m: dict, tutor: bool) -> str:
     ov, fills = m.get("tips"), m.get("fills") or {}
     parts = []
     for i, line in enumerate(m.get("display", m["content"]).split("\n")):
-        h = _tipped(line, ov)
-        if tutor and HAS_CJK.search(line):
-            h += _spk(line)
-        parts.append(h)
+        # keep Chinese and its English translation on separate lines
+        for seg in _split_bilingual_line(line):
+            h = _tipped(seg, ov)
+            if tutor and HAS_CJK.search(seg):
+                h += _spk(seg)
+            parts.append(h)
         if i in fills:
             f = _tipped(fills[i], ov)
             if HAS_CJK.search(fills[i]):
@@ -1306,7 +1386,12 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
     else:
         system = c.SYSTEM_PROMPT_APP
     user_turn = {"role": "user", "content": user_msg}
-    english_prompt = _mostly_ascii(user_msg) and len(user_msg.strip()) >= 8
+    # Translate when the message is at least half English by content: catches pure
+    # and English-dominant input in both modes (the old *mostly-ASCII* gate skipped
+    # short/mixed messages), but leaves a predominantly-Chinese message with a stray
+    # English word alone — otherwise 聊天 would round-trip the student's own Chinese.
+    _latin = len(re.findall(r"[A-Za-z]", user_msg))
+    english_prompt = _latin >= 4 and _latin >= len(HAS_CJK.findall(user_msg))
     if conversational and english_prompt:
         # the conversation must stay Chinese for the MODEL — English input makes
         # the tutor drift into translating/evaluating instead of conversing. The
@@ -1376,19 +1461,23 @@ def respond(user_msg: str, raw: list[dict], mode: str, deck_json: str,
     if ov:
         raw[-2]["tips"] = ov
         raw[-1]["tips"] = ov
-    if not conversational:   # 聊天 mode is Chinese-only by design
-        fills = fill_translations(reply)
-        if fills:
-            raw[-1]["fills"] = fills
-        # a Q&A English prompt gets its Chinese under the student's bubble —
-        # keyed to the last NON-EMPTY line (a trailing newline must not detach
-        # it). In 聊天 mode this already happened before generation.
-        if english_prompt:
-            zh = translate_user_to_chinese(user_msg)
-            if zh:
-                msg_lines = user_msg.split("\n")
-                idx = max((i for i, l in enumerate(msg_lines) if l.strip()), default=0)
-                raw[-2]["fills"] = {idx: zh}
+    # Bilingual replies in BOTH modes: every untranslated Chinese line in the
+    # tutor's reply gets its English translation. (聊天 was Chinese-only by design;
+    # now consistent with Q&A per user request. The MODEL still writes clean Chinese
+    # — the English is a serve-layer fill, exactly like Q&A — so the reading layer
+    # and the correction-detection stay unaffected.)
+    fills = fill_translations(reply)
+    if fills:
+        raw[-1]["fills"] = fills
+    # a Q&A English prompt gets its Chinese under the student's bubble — keyed to
+    # the last NON-EMPTY line (a trailing newline must not detach it). In 聊天 mode
+    # this already happened before generation, so only Q&A needs it here.
+    if not conversational and english_prompt:
+        zh = translate_user_to_chinese(user_msg)
+        if zh:
+            msg_lines = user_msg.split("\n")
+            idx = max((i for i, l in enumerate(msg_lines) if l.strip()), default=0)
+            raw[-2]["fills"] = {idx: zh}
     yield (render_chat(raw), raw, "", targets, bar())
 
 
@@ -1508,6 +1597,69 @@ def flashcards_srcdoc() -> str:
     return f'<iframe class="cards-frame" title="flashcards" srcdoc="{html.escape(page, quote=True)}"></iframe>'
 
 
+# --------------------------------------------------------------------------- #
+# Reading practice: the model writes a short HSK-5 passage on a topic, rendered
+# through the reading layer (pinyin + hover gloss + click-to-collect), with
+# comprehension questions whose answers reveal on click. One model call/passage.
+# --------------------------------------------------------------------------- #
+def _reading_shell(inner: str) -> str:
+    return f'<div class="reading">{inner}</div>'
+
+
+def _render_passage(title: str, passage: str, translation: str, questions: list) -> str:
+    """Annotated passage (collectible words + hover gloss + a 🔊), the English
+    translation, and comprehension questions with reveal-on-click answers."""
+    spk = (f'<button class="spk" title="朗读 · read aloud"'
+           f' data-speak="{html.escape(chinese_only(passage), quote=True)}">🔊</button>')
+    qs = ""
+    for i, q in enumerate(questions, 1):
+        qz, az = _tipped(str(q.get("q", ""))), _tipped(str(q.get("a", "")))
+        qs += (f'<div class="rd-q"><div class="rd-qtext">{i}. {qz}</div>'
+               f'<button class="rd-reveal" type="button">显示答案 · show answer</button>'
+               f'<div class="rd-a" hidden>{az}</div></div>')
+    trans = f'<div class="rd-trans">{html.escape(translation)}</div>' if translation else ""
+    qblock = (f'<div class="rd-qs"><div class="rd-qs-h">理解问题 · comprehension</div>{qs}</div>'
+              if qs else "")
+    return (f'<div class="rd-title">{_tipped(title)} {spk}</div>'
+            f'<div class="rd-passage">{_tipped(passage)}</div>{trans}{qblock}')
+
+
+def gen_passage(topic: str):
+    """Yield a placeholder, then an HSK-5 reading passage + comprehension
+    questions on `topic` (random CONV_TOPIC when blank), rendered annotated."""
+    topic = (topic or "").strip() or random.choice(c.CONV_TOPICS)
+    yield _reading_shell(
+        f'<div class="rd-loading">正在写一篇关于“{html.escape(topic)}”的短文…<br>'
+        f'writing a passage about “{html.escape(topic)}”…</div>')
+    prompt = (
+        f"为一个HSK5水平的学生写一篇简短的中文阅读短文，主题是“{topic}”。\n"
+        "要求：\n"
+        "- 大约120字，写成连贯的一段（不要分行），用HSK5或以下的词汇和语法，自然、有意思。\n"
+        "- 不要拼音。\n"
+        "- 出3个中文理解问题，每个配一个简短的中文参考答案。\n"
+        "- 给出整篇短文的英文翻译。\n"
+        "只返回一个JSON对象，所有字符串写在一行内（不要换行）：\n"
+        '{"title":"标题","passage":"短文","translation":"English translation",'
+        '"questions":[{"q":"问题","a":"答案"},{"q":"…","a":"…"},{"q":"…","a":"…"}]}\n'
+        "不要解释，不要用markdown。"
+    )
+    try:
+        out = generate([{"role": "user", "content": prompt}], temperature=0.8, max_tokens=1024)
+        data = extract_json_object(out)
+        passage = str(data.get("passage", "")).strip()
+        if not passage:
+            raise ValueError("empty passage")
+        questions = [q for q in data.get("questions", []) if isinstance(q, dict) and q.get("q")]
+        yield _reading_shell(_render_passage(
+            str(data.get("title", topic)).strip(), passage,
+            str(data.get("translation", "")).strip(), questions))
+    except Exception as e:  # noqa: BLE001 — a failed passage is retryable via the button
+        yield _reading_shell(
+            '<div class="rd-loading">这篇没写成，请再点一次“生成短文”。<br>'
+            "That one didn’t generate — click “new passage” to retry. "
+            f"({html.escape(str(e)[:50])})</div>")
+
+
 with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
     gr.HTML(HEADER_HTML)
     with gr.Tab("对话 · chat"):
@@ -1568,6 +1720,18 @@ with gr.Blocks(title="HSK-5 中文 Tutor") as demo:
         # resets them — the next message re-picks under the new mode instead
         # of the checkbox being a silent no-op mid-conversation
         review_mode.change(lambda: (None, ""), None, [targets_state, targets_bar])
+    with gr.Tab("阅读 · reading"):
+        with gr.Row(elem_id="rd-controls"):
+            rd_topic = gr.Textbox(
+                placeholder="主题，可留空随机 · topic (blank = random)",
+                show_label=False, container=False, elem_id="rd-topic", scale=5)
+            rd_btn = gr.Button("生成短文 · new passage", elem_id="rd-btn", scale=1)
+        rd_out = gr.HTML(_reading_shell(
+            '<div class="rd-loading">点“生成短文”，我会写一篇HSK5短文和几个理解问题。<br>'
+            'Click “new passage” for an HSK-5 reading with comprehension questions.<br>'
+            '每个词都能悬停看释义、点一下收藏 · hover any word for its meaning, click to save it.</div>'))
+        rd_btn.click(gen_passage, rd_topic, rd_out)
+        rd_topic.submit(gen_passage, rd_topic, rd_out)
     with gr.Tab("卡片 · flashcards"):
         gr.HTML(flashcards_srcdoc())
     with gr.Tab("词表 · word list"):
