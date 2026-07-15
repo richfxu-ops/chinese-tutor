@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> Coding preferences for this repo. Project facts, plans, and tasks live in `planning/` — see the index at the bottom. Keep this file prefs-only and lean; it's read into context every session.
+> Coding preferences for this repo. Project facts, plans, code, and tooling are indexed in `INDEX.md` (repo root) — read that to find any file. Keep this file prefs-only and lean; it's read into context every session, so it points at the detail rather than holding it.
 
 ## How to work with me
 
@@ -18,12 +18,12 @@
 - **Keep it a vibe project.** Small dataset, light qualitative eval, don't over-engineer. If scope starts creeping, say so and we cut.
 - **Long explanations → a local HTML file, opened in my browser.** When an explanation would be long or detailed, write it to a local HTML file under `docs/`, then run `open <file>` (macOS) to launch it in my default browser — the markdown link opens the in-app preview, which I don't want. Leave a short summary + the `open <file>` command in chat.
 
-## Planning docs (where the project detail lives)
+## Where to find things
 
-- `planning/PLAN.md` — what we're building: purpose, scope, features, roadmap, open questions.
-- `planning/ARCHITECTURE.md` — repo structure, module responsibilities, run commands, conventions to match.
-- `planning/TASKS.md` — the task board (source of truth for work to do).
-- `planning/DECISIONS.md` — dated log of decisions and their rationale.
-- `planning/dashboard.html` — visual task tracker that reads `TASKS.md`.
+**`INDEX.md` (repo root) is the table of contents** — where every doc, module, and tool lives, each referenced by path. When you need to find something (a planning doc, a code module, content, a script), read `INDEX.md` first and follow the pointer instead of searching blind. It's kept out of this file on purpose so `CLAUDE.md` stays lean. `planning/ARCHITECTURE.md` is the fuller structural reference.
+
+**Keep `INDEX.md` current.** Any structural change to the repo belongs in `INDEX.md` in the same change — adding an important file, module, or doc; moving, renaming, or removing one; or reorganizing the layout. Add, update, or delete the affected pointer(s) so the map never lies — a stale index is worse than none.
 
 **Read `planning/PLAN.md` and `planning/TASKS.md` at the start of a work session.** When work is completed, update `TASKS.md`; when a notable choice is made, log it in `DECISIONS.md`.
+
+**Task lifecycle.** Substantial tasks are worked via the `/task` skill (`.claude/skills/task/SKILL.md`): statuses flow To Do → In Proposal → In Progress → In Review → Complete, and no implementation code is written before the design is signed off (In Progress). Even without invoking the skill, follow that lifecycle — never skip from an unscoped task straight into code.

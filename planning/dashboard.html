@@ -50,6 +50,8 @@
   .card.p2 { border-left-color: var(--p2); } .card.p3 { border-left-color: var(--p3); }
   .card.done .ttl { text-decoration: line-through; color: var(--muted); }
   .card .ttl { font-size: 14px; }
+  .card .ttl a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .card .ttl a:hover { text-decoration: underline; }
   .card .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
   .badge { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 6px; color: #fff; }
   .badge.p0 { background: var(--p0); } .badge.p1 { background: var(--p1); }
@@ -105,6 +107,9 @@ function parseTasks(md) {
       let text = t[2];
       const checked = /[xX]/.test(t[1]);
       const colDone = cur.name.toLowerCase() === "done";
+      const linkM = text.match(/\[([^\]]+)\]\(([^)\s]+)\)/);
+      const link = linkM ? linkM[2] : null;
+      if (linkM) text = text.replace(linkM[0], linkM[1]);
       const priM = text.match(/\((P[0-3])\)/i);
       const priority = priM ? priM[1].toUpperCase() : null;
       const tags = [...text.matchAll(/#([\w-]+)/g)].map(m => m[1]);
@@ -115,7 +120,7 @@ function parseTasks(md) {
         .replace(/#[\w-]+/g, "")
         .replace(/^([A-Za-z]{1,6}\d+|\d+\.)\s+/, "")
         .replace(/\s{2,}/g, " ").trim();
-      cur.tasks.push({ title: ttl || text.trim(), done: checked || colDone, priority, tags, id });
+      cur.tasks.push({ title: ttl || text.trim(), done: checked || colDone, priority, tags, id, link });
     }
   }
   return { title, columns };
@@ -185,7 +190,10 @@ function render() {
       if (t.priority) meta.push(`<span class="badge ${pcls}">${t.priority}</span>`);
       if (t.id) meta.push(`<span class="id">${escapeHtml(t.id)}</span>`);
       t.tags.forEach(tag => meta.push(`<span class="tag">#${escapeHtml(tag)}</span>`));
-      card.innerHTML = `<div class="ttl">${escapeHtml(t.title)}</div>` +
+      const ttlHtml = t.link
+        ? `<a href="${escapeHtml(t.link)}" target="_blank" rel="noopener">${escapeHtml(t.title)}</a>`
+        : escapeHtml(t.title);
+      card.innerHTML = `<div class="ttl">${ttlHtml}</div>` +
         (meta.length ? `<div class="meta">${meta.join("")}</div>` : "");
       c.appendChild(card);
     });
