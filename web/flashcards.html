@@ -306,7 +306,7 @@ function backView(c){
       <div class="front">${esc(c.front)} <button class="spk" onclick="speak(current.front)" title="Play (p)">🔊</button>${editBtn}</div>
       <div class="pinyin">${esc(c.pinyin)}</div>
       <div class="gloss">${esc(c.gloss)}</div>
-      ${c.example ? `<div class="example">${esc(c.example)} <button class="spk sm" onclick="speak(current.example)" title="Play sentence">🔊</button>
+      ${c.example ? `<div class="example">${esc(c.example)} <button class="spk sm" onclick="speak(current.example)" title="Play sentence (s)">🔊</button>
         ${c.example_en ? `<div class="example-en">${esc(c.example_en)}</div>` : ``}</div>` : ``}
       ${askRow}
     </div>
@@ -456,6 +456,11 @@ document.addEventListener("keydown", e => {
   if(e.key === "p" || e.key === "P"){
     // fix cards: never voice the wrong sentence — play the correction once revealed
     if(current) speak(current.kind === "fix" ? (revealed ? current.fix : "") : current.front);
+    return;
+  }
+  if(e.key === "s" || e.key === "S"){
+    // the example sentence only exists on a revealed normal card's back
+    if(revealed && current && current.example) speak(current.example);
     return;
   }
   if(!revealed && (e.code === "Space" || e.code === "Enter")){ e.preventDefault(); reveal(); return; }

@@ -204,14 +204,14 @@ button[role="tab"][aria-selected="true"] {
 #mode-row > * { flex:0 0 auto !important; width:auto !important; min-width:0 !important;
                 margin:0 !important; }   /* Gradio's .auto-margin centers wrapped children */
 /* each pill group is one inline flex line: small mono label + its pills */
-#mode, #level { display:flex !important; align-items:center; gap:.55rem; }
-#mode .wrap, #level .wrap { display:flex; flex-direction:row; flex-wrap:nowrap; gap:.4rem; }
-#mode::before, #level::before {
+#mode, #level, #rd-level { display:flex !important; align-items:center; gap:.55rem; }
+#mode .wrap, #level .wrap, #rd-level .wrap { display:flex; flex-direction:row; flex-wrap:nowrap; gap:.4rem; }
+#mode::before, #level::before, #rd-level::before {
   font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.6rem;
   letter-spacing:.13em; text-transform:uppercase; color:var(--ink-soft); flex:0 0 auto;
 }
 #mode::before { content:"模式 · mode"; }
-#level::before { content:"水平 · level"; }
+#level::before, #rd-level::before { content:"水平 · level"; }
 /* strip Gradio's block chrome: no border/padding, size to the label text */
 #review-mode { flex:0 0 auto !important; width:auto !important;
                min-width:fit-content !important; border:none !important;
@@ -237,19 +237,19 @@ button[role="tab"][aria-selected="true"] {
   border:solid var(--sheet); border-width:0 2px 2px 0; transform:rotate(45deg);
 }
 /* #level (the HSK selector) shares the mode toggle's pill look */
-#mode, #level { margin:.15rem 0 .1rem; }
-#mode label, #level label {
+#mode, #level, #rd-level { margin:.15rem 0 .1rem; }
+#mode label, #level label, #rd-level label {
   background:transparent !important; border:1px solid var(--hairline) !important;
   border-radius:2px !important; color:var(--ink-soft) !important;
   font-family:"IBM Plex Mono",ui-monospace,monospace !important; font-size:.68rem !important;
   letter-spacing:.1em; text-transform:uppercase; padding:.3rem .65rem !important;
   box-shadow:none !important; cursor:pointer;
 }
-#mode label.selected, #level label.selected {
+#mode label.selected, #level label.selected, #rd-level label.selected {
   color:var(--cinnabar) !important; border-color:var(--cinnabar) !important;
   background:var(--sheet) !important;
 }
-#mode input, #level input { display:none; }
+#mode input, #level input, #rd-level input { display:none; }
 
 /* 🔊 voice picker + speed slider — its own row; cluster everything inline on the
    left. Gradio row children default to flex-grow, which spread them apart (the
@@ -341,12 +341,9 @@ button[role="tab"][aria-selected="true"] {
 #rd-btn { background:var(--cinnabar) !important; color:var(--sheet) !important;
           border:none !important; border-radius:3px !important; white-space:nowrap; flex:none !important; }
 #rd-btn:hover { background:var(--cinnabar-deep) !important; }
-/* the level indicator (mirrors the chat tab's selector; change it there) */
-#rd-level-box { flex:0 0 auto !important; width:auto !important; min-width:0 !important; }
-.rd-level { font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.66rem;
-            letter-spacing:.1em; text-transform:uppercase; color:var(--cinnabar);
-            border:1px solid var(--cinnabar); border-radius:2px; padding:.3rem .6rem;
-            white-space:nowrap; }
+/* the reading tab's own HSK selector — pill look from #rd-level above; keep it
+   sized to its content so rd-topic (scale=5) takes the row's stretch */
+#rd-level { flex:0 0 auto !important; width:auto !important; min-width:0 !important; }
 .reading {
   background:var(--sheet); border:1px solid var(--hairline); border-radius:4px;
   box-shadow:0 1px 3px rgba(60,48,30,.08), 0 14px 34px -22px rgba(60,48,30,.35);

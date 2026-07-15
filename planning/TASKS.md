@@ -21,6 +21,8 @@
 ## In Progress
 
 ## Done
+- [x] Reading tab: its own HSK 4/5/6 selector (independent of chat), replacing the read-only chip #ship
+- [x] Flashcards: `s` shortcut plays the example sentence's TTS (companion to `p`) #ship
 - [x] Initialize repository + feature branch (feat/hsk5-tutor)
 - [x] Plan approved: QLoRA-on-Colab, Qwen2.5-1.5B-Instruct, Claude teacher, ~800–1k pairs
 - [x] Scaffold repo (CLAUDE.md + planning/ + dashboard) + GitHub remote #infra
