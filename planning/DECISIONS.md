@@ -2,6 +2,13 @@
 
 > Dated log of notable choices and *why*, so rationale isn't lost. Newest first.
 
+## 2026-07-16 — Deleted every local model except the live 14B (drops the 7B rollback)
+- **Decision (user request):** Cleared `outputs/` of everything except the live 14B GGUF (`hsk5-tutor-q4_k_m.gguf`) and `eval_report.md` — 18G → 8.4G. Deleted: `hsk5-tutor-q4_k_m.v1.gguf` (superseded 7B v1), `hsk5-tutor-q4_k_m.7b-v2.gguf` (the 7B rollback), `checkpoint-51/` + `checkpoint-102/` (intermediate 7B training state; ckpt-102's adapter was byte-identical to the top-level one), and the top-level 7B LoRA adapter bundle (adapter + tokenizer + configs).
+- **This reverses the 2026-07-12 "7B kept for rollback/A-B" decision.** Disk beat optionality: the 7B had sat unused since the 14B shipped, and the retained 9.6G wasn't paying for itself.
+- **Implications — the escape hatch is gone.** The latency mitigation floated on 2026-07-12 (run main generation on the 14B, auxiliary calls like disambiguation/fills on the 7B) is no longer a local option, and neither is a straight 7B rollback or 7B/14B A-B. Reinstating either now costs a full Colab retrain → `merge.py` → GGUF quantize. **The 7B artifacts were local-only** — only the 14B is published (`richfxu/hsk5-tutor-14b-gguf`, re-downloadable via `./setup.sh`); nothing 7B survives anywhere.
+- **Note:** the 14B adapter was never kept locally — it stayed on Colab and only the merged/quantized GGUF came back. So there is now no adapter in the repo at all.
+- **Verified:** the app loads and generates on the surviving 14B after the deletion (startup starter prompts came back as real model output; no errors).
+
 ## 2026-07-15 — Reading tab gets its own HSK selector; flashcards get an `s` shortcut
 - **Decision (user request):** Two small UI changes. (1) The 阅读 reading tab now has its **own** HSK 4/5/6 selector (`rd_level_pick`) instead of a read-only chip mirroring the chat tab — `gen_passage` reads it directly. The reading level is **independent** of the chat tab's level (each tab picks its own), rather than synced both ways, which is fiddlier in Gradio and more surprising. Default HSK 5. (2) Flashcards: pressing **`s`** plays the example sentence's TTS (companion to `p` for the word), guarded to revealed normal cards that actually have an example; the 🔊 button tooltip now reads "Play sentence (s)".
 - **Why:** Setting the reading level meant switching to the chat tab first; a local selector is the obvious fix. On flashcards, the word already had a `p` shortcut but the example didn't — `s` (for "sentence") fills the gap.
