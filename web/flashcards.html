@@ -229,8 +229,8 @@ function schedule(card, rating){
     card.due = Date.now() + 60*1000;               // ~1 min: comes back this session
     return card;
   }
-  if (card.reps === 0)      card.interval = (rating === "easy") ? 4 : 1;
-  else if (card.reps === 1) card.interval = 6;
+  if (card.reps === 0)      card.interval = {hard:1, good:2, easy:4}[rating];
+  else if (card.reps === 1) card.interval = {hard:4, good:6, easy:8}[rating];
   else {
     let mult = card.ease * (rating === "hard" ? 0.8 : 1) * (rating === "easy" ? 1.3 : 1);
     card.interval = Math.max(1, Math.round(card.interval * mult));
